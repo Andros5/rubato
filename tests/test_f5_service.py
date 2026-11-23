@@ -267,3 +267,15 @@ def test_a_long_running_attempt_keeps_its_concurrency_slot_past_the_ledger_lookb
         ok(c.post(f"/v1/attempts/{p['attempt']}/start"))
         advance(4 * 86400)  # beyond the 3-day ledger lookback; the call has not been settled
         assert ok(c.post("/v1/claims", json={"job": "next", "step": "s"}))["permit"] is None
+
+
+def test_a_focused_claim_is_not_blocked_by_a_speculative_planner_grant():
+    reset(TEN)
+    with client("radar") as c, client("admin") as a:
+        ok(c.post("/v1/jobs", json=job("older")), 201)
+        ok(c.post("/v1/claims", json={"job": "older", "step": "missing"}))  # marks the executor available
+        ok(c.post("/v1/jobs", json=job("newer")), 201)
+        ok(a.post("/v1/admin/schedule"))  # the planner pre-grants the only slot to "older"
+        p = ok(c.post("/v1/claims", json={"job": "newer", "step": "s"}))["permit"]
+        assert p and p["job"] == "radar:newer"
+        assert ok(c.get("/v1/jobs/older"))["steps"][0]["state"] == "ready"

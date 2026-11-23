@@ -11,11 +11,12 @@ from contextlib import asynccontextmanager
 
 import psycopg
 from fastapi import Body, FastAPI, Header, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from . import db, store
+from .panel import PANEL_HTML
 from .store import ApiError
 
 log = logging.getLogger("rubato.api")
@@ -329,12 +330,41 @@ def post_reset(authorization: str | None = Header(None)):
         )
         conn.execute("DELETE FROM resources")
         conn.execute(
-            "UPDATE clients SET available_until=NULL, slots=CASE WHEN role='admin' THEN 0 ELSE 1 END, models='[]'"
+            "UPDATE clients SET available_until=NULL, slots=CASE WHEN role='admin' THEN 0 ELSE 1 END, models='[]', mode='off', mode_changed_at=NULL"
         )
         conn.execute("UPDATE test_clock SET offset_s=0")
         return {"ok": True}
 
     return tx(run)
+
+
+@app.get("/v1/mode")
+def get_mode(authorization: str | None = Header(None)):
+    """The coordination mode the administrator chose for the calling client."""
+    return tx(lambda conn: store.get_mode(conn, _client(conn, authorization)))
+
+
+@app.put("/v1/admin/clients/{cid}/mode")
+def put_mode(cid: str, body: dict = Body(...), authorization: str | None = Header(None)):
+    def run(conn):
+        return store.set_mode(conn, _admin(conn, authorization), cid, body.get("mode"))
+
+    return tx(run)
+
+
+@app.get("/v1/admin/overview")
+def get_overview(authorization: str | None = Header(None)):
+    def run(conn):
+        _admin(conn, authorization)
+        return store.overview(conn)
+
+    return tx(run)
+
+
+@app.get("/panel", response_class=HTMLResponse)
+def panel():
+    """Live panel (static page; it asks for the admin token and calls the API)."""
+    return HTMLResponse(PANEL_HTML)
 
 
 @app.get("/v1/admin/attempts")

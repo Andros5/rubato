@@ -133,6 +133,10 @@ class RubatoClient:
     def usage(self) -> dict:
         return self._req("GET", "/v1/usage")
 
+    def mode(self) -> str:
+        """Mode chosen by the administrator for this client (``off`` | ``shadow`` | ``enforce``)."""
+        return self._req("GET", "/v1/mode")["mode"]
+
 
 @dataclass
 class Outcome:
@@ -165,27 +169,53 @@ class Gate:
         mode: str = "off",
         wait_timeout: float = 30.0,
         sleep: Callable[[float], None] = time.sleep,
+        mode_ttl: float = 30.0,
     ):
-        if mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}")
-        self.client, self.mode, self.wait_timeout, self.sleep = client, mode, wait_timeout, sleep
+        if mode not in (*MODES, "auto"):
+            raise ValueError(f"mode must be one of {MODES} or 'auto'")
+        self.client, self.wait_timeout, self.sleep = client, wait_timeout, sleep
+        self.requested = mode
+        self.mode = "off" if mode == "auto" else mode
+        self.mode_ttl = mode_ttl
+        self._mode_checked = -1e18
         self.shadow_log: list[dict] = []
 
+    def current_mode(self) -> str:
+        """``auto`` follows the mode the administrator sets in the panel (cached ``mode_ttl`` s).
+
+        If the service cannot be asked, the last known mode is kept (``off`` before the first
+        answer), so an unreachable Rubato never turns a working application into a blocked one.
+        """
+        if self.requested != "auto" or self.client is None:
+            return self.mode
+        now = time.monotonic()
+        if now - self._mode_checked >= self.mode_ttl:
+            self._mode_checked = now
+            try:
+                m = self.client.mode()
+                if m in MODES:
+                    self.mode = m
+            except Exception as e:
+                log.warning("rubato: mode unavailable, keeping %s: %s", self.mode, e)
+        return self.mode
+
     def register(self, job: dict) -> None:
-        if self.mode == "off" or self.client is None:
+        mode = self.current_mode()
+        if mode == "off" or self.client is None:
             return
         try:
             self.client.register_job(job)
         except Exception as e:
-            if self.mode == "enforce":
+            if mode == "enforce":
                 raise RubatoUnavailable(str(e)) from e
             log.warning("rubato shadow: register failed: %s", e)
 
     def run(self, job: str, step: str, call: Callable[[], tuple[object, Outcome]]) -> GateResult:
-        if self.mode == "off" or self.client is None:
+        mode = self.current_mode()
+        if mode == "off" or self.client is None:
             value, _ = call()
             return GateResult(True, "off", value)
-        if self.mode == "shadow":
+        if mode == "shadow":
             return self._shadow(job, step, call)
         return self._enforce(job, step, call)
 

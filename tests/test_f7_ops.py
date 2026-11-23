@@ -36,11 +36,11 @@ def test_migration_from_previous_schema_keeps_data():
                     "VALUES ('radar:before-upgrade', 's', '{\"requests\": 1}', 'ready')"
                 )
             assert db.schema_version(conn) == "0001_init.sql"
-            assert db.migrate(conn) == ["0002_meta_and_audit_idx.sql"]
+            assert db.migrate(conn) == ["0002_meta_and_audit_idx.sql", "0003_client_mode.sql"]
             row = conn.execute("SELECT id, state, meta FROM jobs").fetchone()
             assert row == {"id": "radar:before-upgrade", "state": "active", "meta": {}}
             assert db.migrate(conn) == []  # idempotent
-            assert db.schema_version(conn) == "0002_meta_and_audit_idx.sql"
+            assert db.schema_version(conn) == "0003_client_mode.sql"
     finally:
         with psycopg.connect(DSN, autocommit=True) as admin:
             admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
@@ -67,7 +67,7 @@ def test_metrics_cover_queue_permits_reasons_and_ledger_without_job_labels():
         assert f"# TYPE {name}" in text
     assert 'reason="capacity_exhausted"' in text
     assert "metric-a" not in text and "metric-b" not in text and "job=" not in text
-    assert ok(httpx.get(f"{API}/readyz"))["schema"] == "0002_meta_and_audit_idx.sql"
+    assert ok(httpx.get(f"{API}/readyz"))["schema"] == "0003_client_mode.sql"
 
 
 @needs_service
