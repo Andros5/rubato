@@ -166,7 +166,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_init_demo)
 
     s = sub.add_parser("demo-service", help="two clients share one quota on a running service (synthetic)")
-    s.add_argument("rest", nargs=argparse.REMAINDER)
+    s.add_argument("--api", default="http://127.0.0.1:8000")
+    s.add_argument("--provider", default="http://127.0.0.1:8100")
+    s.add_argument("--admin-token", default="admin-local-token")
+    s.add_argument("--radar-token", default="radar-local-token")
+    s.add_argument("--citalab-token", default="citalab-local-token")
     s.set_defaults(fn=cmd_demo_service)
     return p
 
@@ -184,9 +188,13 @@ def cmd_init_demo(a: argparse.Namespace) -> int:
 
 
 def cmd_demo_service(a: argparse.Namespace) -> int:
-    from .demo_service import main as demo_main
+    import time
 
-    return demo_main(a.rest)
+    from .demo_service import run_demo
+
+    tokens = {"admin": a.admin_token, "radar": a.radar_token, "citalab": a.citalab_token}
+    print(json.dumps(run_demo(a.api, a.provider, tokens, f"demo{int(time.time())}"), indent=2))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
