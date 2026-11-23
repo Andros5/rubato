@@ -11,6 +11,15 @@ En CitaLab no se toca el código evaluado: `scripts/reproduce.py` sigue respondi
 «todo coincide con lo publicado». Una primera versión que modificaba `client.py` y
 `runner.py` rompía esa comprobación (2 ficheros distintos) y se descartó.
 
+## Modo `auto` (1.1.0)
+
+Ambos adaptadores aceptan `auto` (radar `65a9672`, CitaLab `0f98803`): leen
+`GET /v1/mode` con caché de 30 s y obedecen el interruptor del panel. Si Rubato no
+responde mantienen el último modo conocido (`off` antes de la primera respuesta).
+Probado con transporte simulado (radar 109 pruebas de las rutas afectadas, CitaLab suite
+completa y `reproduce.py` intacto) y, en el radar, contra el servicio real: tras poner
+`enforce` en el panel, el adaptador devolvió `enforce`.
+
 ## Modos
 
 | Modo | Radar (`RADAR_RUBATO_MODE`) | CitaLab (`CITALAB_RUBATO_MODE`) |

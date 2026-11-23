@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.0 — 2026-11-23 (local release, not published)
+
+- Live panel at `/panel`: quota per resource (background, urgent, uncertain), queue and
+  waiting reasons per client, latest decisions, uncertain attempts with one-click
+  reconciliation, active policy editor, alerts (uncertain attempts, provider pauses,
+  quota below 10 %). Self-contained, escaped, works on a phone.
+- Client modes controlled from the service: migration `0003_client_mode.sql`,
+  `GET /v1/mode`, `PUT /v1/admin/clients/{id}/mode`; SDK `Gate(mode="auto")` and the
+  radar and CitaLab adapters (`auto`) follow the switch within 30 s and keep the last
+  known mode if Rubato is unreachable.
+- `GET /v1/admin/overview` and `rubato shadow-report` (agreement, divergences, added
+  latency, readiness for enforce).
+- Fix: a focused claim (adapter asking for one step) released the speculative permits the
+  background planner had granted to the same client for other steps; before, with one
+  slot, the adapter waited until those permits expired (60 s).
+
 ## 1.0.1 — 2026-11-23 (local release, not published) — audit
 
 ### Performance
