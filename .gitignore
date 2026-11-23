@@ -35,3 +35,6 @@ dist/
 
 # local development tool settings
 .claude/
+
+# private planning documents (kept only locally)
+docs/desarrollo/PLAN_*.md
