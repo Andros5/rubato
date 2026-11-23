@@ -47,6 +47,7 @@ button{cursor:pointer}button.primary{background:var(--c1);color:#fff;border-colo
    <p><button class="primary">Aplicar política</button> <span id="pmsg"></span></p></form></div>
   <div class="card"><h2>Cola</h2><table id="queue"></table><h2 style="margin-top:12px">Motivos de espera</h2><table id="reasons"></table></div>
  </div>
+ <div class="card" style="margin-top:14px"><h2>Fase shadow (24 h)</h2><table id="shadow"></table><p class="sub">Qué habría decidido Rubato en las llamadas que los clientes en shadow hicieron por su cuenta. «Aplazaría» = divergencia.</p></div>
  <div class="card" style="margin-top:14px"><h2>Intentos inciertos</h2><table id="unknown"></table></div>
  <div class="card" style="margin-top:14px"><h2>Pasos en espera</h2><table id="waiting"></table></div>
  <div class="card" style="margin-top:14px"><h2>Últimas decisiones</h2><table id="decisions"></table></div>
@@ -78,6 +79,8 @@ async function load(){let d;try{d=await api('GET','/v1/admin/overview')}catch(e)
  const byc={};d.queue.forEach(q=>{(byc[q.client_id]=byc[q.client_id]||{})[q.state]=q.n;if(q.state==='ready')byc[q.client_id].oldest=q.oldest});
  const st=['ready','waiting','granted','running','unknown'];$('queue').innerHTML='<tr><th>Cliente</th>'+st.map(s=>'<th class="num">'+s+'</th>').join('')+'<th>Más antiguo</th></tr>'+Object.entries(byc).map(([c,v])=>'<tr><td>'+esc(c)+'</td>'+st.map(s=>'<td class="num">'+(v[s]||0)+'</td>').join('')+'<td>'+ago(now,v.oldest)+'</td></tr>').join('');
  $('reasons').innerHTML='<tr><th>Cliente</th><th>Motivo</th><th class="num">Pasos</th><th>Próxima revisión</th></tr>'+d.reasons.map(r=>'<tr><td>'+esc(r.client_id)+'</td><td>'+why(r.last_reason)+'</td><td class="num">'+r.n+'</td><td>'+hhmm(r.next)+'</td></tr>').join('');
+ const sh={};d.shadow_24h.forEach(x=>{const c=sh[x.client_id]=sh[x.client_id]||{agree:0,diverge:0,reasons:{}};if(x.action==='authorize')c.agree+=x.n;else{c.diverge+=x.n;c.reasons[x.reason]=(c.reasons[x.reason]||0)+x.n}});
+ $('shadow').innerHTML=Object.keys(sh).length?'<tr><th>Cliente</th><th class="num">Coincide</th><th class="num">Aplazaría</th><th>Motivos de divergencia</th></tr>'+Object.entries(sh).map(([c,v])=>'<tr><td>'+esc(c)+'</td><td class="num">'+v.agree+'</td><td class="num">'+v.diverge+'</td><td>'+Object.entries(v.reasons).map(([r,n])=>why(r)+' × '+n).join(', ')+'</td></tr>').join(''):'<tr><td class="sub">Sin llamadas en shadow en las últimas 24 h.</td></tr>';
  $('unknown').innerHTML=d.unknown_attempts.length?'<tr><th>Intento</th><th>Trabajo / paso</th><th>Cliente</th><th>Iniciado</th><th>Reservado</th><th>Resolver</th></tr>'+d.unknown_attempts.map(a=>'<tr><td>'+esc(a.id.slice(0,8))+'</td><td>'+esc(a.job_id)+' / '+esc(a.step_id)+'</td><td>'+esc(a.client_id)+'</td><td>'+hhmm(a.started_at)+'</td><td>'+esc(JSON.stringify(a.admitted))+'</td><td><button data-rec="'+esc(a.id)+'" data-c="1">Sí consumió</button> <button data-rec="'+esc(a.id)+'" data-c="0">No consumió</button></td></tr>').join(''):'<tr><td class="sub">Ninguno. Todo liquidado.</td></tr>';
  document.querySelectorAll('button[data-rec]').forEach(b=>b.onclick=async()=>{const consumed=b.dataset.c==='1';
   if(!confirm(consumed?'Confirmar que el proveedor procesó la llamada (se mantiene el consumo reservado).':'Confirmar que el proveedor NO la procesó: se libera la reserva y el paso vuelve a la cola.'))return;
