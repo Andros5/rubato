@@ -222,3 +222,25 @@ def test_gate_keeps_the_application_error_when_rubato_cannot_settle():
 
     with pytest.raises(TimeoutError, match="provider timed out"):
         gate.run("j", "s", call)
+
+
+def test_reserve_does_not_protect_urgent_work_that_already_missed_its_deadline():
+    from rubato.policies import ReservePolicy
+    from rubato.sim import simulate
+
+    res = [ResourceSpec("q", "requests", 2, "total"), ResourceSpec("rate", "requests", 1, "rolling", 1)]
+    late = Job(
+        "u",
+        "c",
+        "app",
+        0,
+        (Step("a", {"requests": 1}, duration_estimate=5), Step("b", {"requests": 1}, ("a",))),
+        urgent=True,
+        deadline=3,
+        provenance={"arrival": Provenance.SYNTHETIC},
+    )
+    bg = Job("bg", "c", "bg", 0, (Step("s", {"requests": 1}),), provenance={"arrival": Provenance.SYNTHETIC})
+    kept = simulate([late, bg], res, ReservePolicy(reserve={"q": 0}, impossible="run")).by_id()
+    dropped = simulate([late, bg], res, ReservePolicy(reserve={"q": 0}, impossible="drop")).by_id()
+    assert kept["bg"].status == "pending"  # quota held for the urgent steps
+    assert dropped["u"].status == "closed" and dropped["bg"].status == "done"

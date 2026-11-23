@@ -344,7 +344,9 @@ class Simulator:
                         if state[(jid, s.id)].status == "ready"
                     ]
                     demand.append(
-                        Demand(jid, job.urgent, job.deadline, rem_need, min(waits) if waits else None)
+                        Demand(
+                            jid, job.urgent, job.deadline, rem_need, min(waits) if waits else None, rem_dur
+                        )
                     )
                 for s in job.steps:
                     st = state[(jid, s.id)]
