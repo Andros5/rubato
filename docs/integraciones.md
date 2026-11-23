@@ -4,8 +4,8 @@ Cada adaptador vive en una rama aislada de su repositorio, **sin fusionar**:
 
 | Repositorio | Rama | Commits | Enganche | Ficheros |
 |---|---|---|---|---|
-| swiss-job-radar | `rubato-adapter` | `d6d9c2e`, `30a0803` | `GoogleAI._reserve` (tras la reserva local) y `GoogleAI._finish` (liquidación única) | `radar/rubato_adapter.py`, 2 enganches en `radar/google_ai.py`, `tests/test_rubato_adapter.py`, `docs/rubato.md` |
-| citalab | `rubato-adapter` | `8ecfc9b` | punto de entrada nuevo `python -m citalab.evaluation.rubato_runner`, que envuelve en memoria `ChatClient._post`, `RequestGate.enter` y `TraceSink.add` | `src/citalab/llm/rubato.py`, `src/citalab/evaluation/rubato_runner.py`, `tests/test_rubato.py`, `docs/rubato.md` |
+| swiss-job-radar | `rubato-adapter` | `0d3b1f5`, `2676e1e` | `GoogleAI._reserve` (tras la reserva local) y `GoogleAI._finish` (liquidación única) | `radar/rubato_adapter.py`, 2 enganches en `radar/google_ai.py`, `tests/test_rubato_adapter.py`, `docs/rubato.md` |
+| citalab | `rubato-adapter` | `9511dfb` | punto de entrada nuevo `python -m citalab.evaluation.rubato_runner`, que envuelve en memoria `ChatClient._post`, `RequestGate.enter` y `TraceSink.add` | `src/citalab/llm/rubato.py`, `src/citalab/evaluation/rubato_runner.py`, `tests/test_rubato.py`, `docs/rubato.md` |
 
 En CitaLab no se toca el código evaluado: `scripts/reproduce.py` sigue respondiendo
 «todo coincide con lo publicado». Una primera versión que modificaba `client.py` y
@@ -13,14 +13,14 @@ En CitaLab no se toca el código evaluado: `scripts/reproduce.py` sigue respondi
 
 ## Modo `auto` (1.1.0)
 
-Ambos adaptadores aceptan `auto` (radar `65a9672`, CitaLab `0f98803`): leen
+Ambos adaptadores aceptan `auto` (radar `959c1ed`, CitaLab `9dac50d`): leen
 `GET /v1/mode` con caché de 30 s y obedecen el interruptor del panel. Si Rubato no
 responde mantienen el último modo conocido (`off` antes de la primera respuesta).
 Probado con transporte simulado (radar 109 pruebas de las rutas afectadas, CitaLab suite
 completa y `reproduce.py` intacto) y, en el radar, contra el servicio real: tras poner
 `enforce` en el panel, el adaptador devolvió `enforce`.
 
-## Codex (radar `ea982a4`)
+## Codex (radar `c7300ec`)
 
 Las llamadas Codex del radar pasan por la misma admisión (`CodexAI._reserve_codex`); un rechazo
 pausa la tarea como los topes locales de Codex. Suite completa del radar en la rama: **521 passed, 3 skipped**.
