@@ -154,6 +154,49 @@ def cmd_status(a: argparse.Namespace) -> int:
     return 1 if d["unknown_attempts"] else 0
 
 
+def cmd_why(a: argparse.Namespace) -> int:
+    """Explain a live job of the service: its steps, attempts and every decision with its reason."""
+    import os
+    from datetime import datetime
+
+    import httpx
+
+    token = a.token or os.environ.get("RUBATO_ADMIN_TOKEN", "admin-local-token")
+    h = {"Authorization": f"Bearer {token}"}
+
+    def hhmm(t):
+        return datetime.fromtimestamp(t).strftime("%H:%M:%S") if t else "-"
+
+    try:
+        job = httpx.get(f"{a.api}/v1/jobs/{a.job}", headers=h, timeout=10)
+        if job.status_code != 200:
+            print(f"{job.status_code}: {job.json().get('message', job.text[:200])}")
+            return 2
+        decs = httpx.get(
+            f"{a.api}/v1/decisions", params={"job": a.job, "limit": 500}, headers=h, timeout=10
+        ).json()
+    except httpx.HTTPError as e:
+        print(f"Rubato is not reachable at {a.api}: {e}")
+        return 2
+    j = job.json()
+    print(
+        f"{j['id']} ({j['cls']}{', urgent' if j['urgent'] else ''}) state {j['state']}, arrived {hhmm(j['arrival'])}"
+        + (f", deadline {hhmm(j['deadline'])}" if j["deadline"] else "")
+    )
+    for s in j["steps"]:
+        nxt = f", reconsider {hhmm(s['next_reconsider'])}" if s["next_reconsider"] else ""
+        print(
+            f"  step {s['step_id']}: {s['state']}, attempts {s['attempts']}, last reason {s['last_reason'] or '-'}{nxt}"
+        )
+    for d in decs:
+        nxt = f"; reconsider {hhmm(d['next_t'])}" if d["action"] == "defer" and d["next_t"] else ""
+        detail = f" {d['detail']}" if d["detail"] else ""
+        print(
+            f"  {hhmm(d['t'])} {d['step_id']}#{d['attempt']} {d['action'].upper()} [{d['reason']}]{detail}{nxt}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from . import __version__
 
@@ -208,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--api", default="http://127.0.0.1:8000")
     s.add_argument("--token", help="admin token (default: RUBATO_ADMIN_TOKEN or the local Compose token)")
     s.set_defaults(fn=cmd_status)
+
+    s = sub.add_parser("why", help="explain a live job of the service (steps, attempts, decisions)")
+    s.add_argument("job", help="job id as the client registered it, prefixed with the client: radar:<id>")
+    s.add_argument("--api", default="http://127.0.0.1:8000")
+    s.add_argument("--token", help="admin token (default: RUBATO_ADMIN_TOKEN or the local Compose token)")
+    s.set_defaults(fn=cmd_why)
 
     s = sub.add_parser("shadow-report", help="agreement, divergences and added latency of a shadow phase")
     s.add_argument("file", help="JSONL written by an adapter in shadow mode")

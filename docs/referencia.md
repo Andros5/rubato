@@ -12,6 +12,7 @@
 | `evaluate --trace F --profile F [--policies-file F] [--pilot F] [--deadline-minutes N] [--out DIR]` | Bloques diseño/ajuste/prueba con veredicto. |
 | `import-radar --radar-dir D --from YYYY-MM-DD --to YYYY-MM-DD [--out private]` | Importación en solo lectura del historial del radar (privado). |
 | `status [--api URL] [--token T]` | Resumen del servicio en marcha: modos, cuota, esperas y avisos (código 1 si hay intentos inciertos). |
+| `why CLIENTE:ID [--api URL] [--token T]` | Explica un trabajo real del servicio: pasos, intentos y cada decisión con su motivo. |
 | `shadow-report FILE [--json]` | Coincidencias, divergencias por motivo, latencia añadida y si hay evidencia suficiente para `enforce`. |
 | `demo-service [--api URL --provider URL --*-token T]` | Dos clientes comparten cuota en un servicio en marcha. |
 | `--version` | Versión. |
