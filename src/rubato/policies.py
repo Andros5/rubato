@@ -119,6 +119,11 @@ class ReservePolicy(_Base):
     def on_impossible(self, item: ReadyItem) -> str:
         return self.impossible if item.urgent else "run"
 
+    def _lost(self, now: int, d: Demand) -> bool:
+        """An urgent job that can no longer meet its deadline is not protected unless
+        the policy keeps running such jobs as urgent (``impossible="run"``)."""
+        return self.impossible != "run" and d.deadline is not None and now + d.remaining_duration > d.deadline
+
     def reserve_for(self, rid: str) -> int | None:
         """Reserve configured for a resource id; keys may be glob patterns such as ``rpd:*``."""
         if rid in self.reserve:
@@ -158,7 +163,7 @@ class ReservePolicy(_Base):
                 (spec.id, True), 0
             )
             speculative = max(0, amount - urgent_used)
-        known = sum(spec.need_of(d.remaining_need) for d in demand if d.urgent)
+        known = sum(spec.need_of(d.remaining_need) for d in demand if d.urgent and not self._lost(now, d))
         known = max(0, known - round_alloc.get((spec.id, True), 0))
         held = max(speculative, known)
         hold_end = None

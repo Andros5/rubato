@@ -32,6 +32,7 @@ class Demand:
     deadline: int | None
     remaining_need: dict[str, int]
     oldest_wait_since: int | None = None
+    remaining_duration: int = 0  # estimated time still needed (sequential), for deadline checks
 
 
 @dataclass

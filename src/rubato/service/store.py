@@ -604,7 +604,7 @@ def _round(
                 dur += int(s["duration_estimate"])
         j0 = srows[0]
         if rem:
-            demand.append(Demand(jid, j0["urgent"], j0["deadline"], rem))
+            demand.append(Demand(jid, j0["urgent"], j0["deadline"], rem, remaining_duration=dur))
         for s in srows:
             target = only is not None and (jid, s["step_id"]) == only
             if s["state"] != "ready" or (free.get(s["client_id"], 0) <= 0 and not target):
