@@ -48,6 +48,9 @@ las aplicaciones arrancadas con `RADAR_RUBATO_MODE=auto` / `CITALAB_RUBATO_MODE=
 (o `Gate(..., mode="auto")`) lo aplican en 30 s, sin reiniciarse. Para decidir si pasar
 de `shadow` a `enforce`: `rubato shadow-report data/integrations/rubato-shadow.jsonl`.
 
+Sin navegador: `rubato status` da el mismo resumen en la consola. Para que el servicio
+arranque solo al iniciar sesión: `scripts/ops/arranque_windows.ps1` (y `-Remove` para quitarlo).
+
 ## 5. Coordinar aplicaciones
 
 `docker compose up --build -d` levanta el servicio. Cada aplicación usa el SDK:
