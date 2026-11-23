@@ -6,7 +6,8 @@
   waiting reasons per client, latest decisions, uncertain attempts with one-click
   reconciliation, active policy editor, alerts (uncertain attempts, provider pauses,
   quota below 10 %), live shadow-phase card (agreement and divergences of the last 24 h
-  from the service events). Self-contained, escaped, works on a phone.
+  from the service events), job card on click (every decision with its reason) and
+  decision filters by client and deferrals only. Self-contained, escaped, works on a phone.
 - Client modes controlled from the service: migration `0003_client_mode.sql`,
   `GET /v1/mode`, `PUT /v1/admin/clients/{id}/mode`; SDK `Gate(mode="auto")` and the
   radar and CitaLab adapters (`auto`) follow the switch within 30 s and keep the last

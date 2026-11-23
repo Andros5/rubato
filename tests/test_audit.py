@@ -244,3 +244,25 @@ def test_reserve_does_not_protect_urgent_work_that_already_missed_its_deadline()
     dropped = simulate([late, bg], res, ReservePolicy(reserve={"q": 0}, impossible="drop")).by_id()
     assert kept["bg"].status == "pending"  # quota held for the urgent steps
     assert dropped["u"].status == "closed" and dropped["bg"].status == "done"
+
+
+@pytest.mark.parametrize("which", ["panel", "report"])
+def test_embedded_javascript_parses(which, tmp_path):
+    """Guard against broken page scripts (e.g. a raw newline inside a JS string literal)."""
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    if which == "panel":
+        from rubato.service.panel import PANEL_HTML as html
+    else:
+        html = TEMPLATE.replace("__DATA__", "{}").replace("__TITLE__", "t")
+    scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+    assert scripts
+    js = tmp_path / f"{which}.js"
+    js.write_text("\n".join(scripts), encoding="utf-8")
+    r = subprocess.run([node, "--check", str(js)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
