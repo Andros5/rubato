@@ -4,7 +4,7 @@
 |---|---|
 | F0 · Repositorio y caso mínimo | Completa (CI Linux pendiente de evidencia) |
 | F1 · Trazas | Completa (jornadas prospectivas pendientes de evidencia) |
-| F2 · Simulador | Pendiente |
+| F2 · Simulador | Completa |
 | F3 · Políticas | Pendiente |
 | F4 · Evaluación y demo | Pendiente |
 | F5 · Servicio | Pendiente |
@@ -12,7 +12,7 @@
 | F7 · Operación y Kubernetes | Pendiente |
 | F8 · Distribución | Pendiente |
 
-**Siguiente tarea.** F2: casos manuales del simulador (llegadas simultáneas, medianoche, tokens, cancelación, dependencia, doble límite).
+**Siguiente tarea.** F3: referencia Radar, optimizador por enumeración y CP-SAT, tres jornadas (reserva mejora / perjudica / da igual).
 
 ## Evidencia por fase
 
@@ -46,3 +46,12 @@
 - Pruebas de comportamiento: reimportación idéntica, reconciliación por motivo, rechazo de esquema incompatible, cero frente a ausente, trabajo imposible de formar (sin referencia), base de origen intacta (mismo `mtime` y bytes), ausencia de texto libre y referencias en la salida, generador determinista y anclado, captura que no rompe al anfitrión y rechaza campos no permitidos.
 - Supuesto o limitación: la llegada histórica es una cota superior (`calls.created` al reservar); no hay plazos históricos; los episodios son una heurística documentada en `docs/trazas.md`. Las preguntas `ask` con referencia `job:` se descartan con motivo propio.
 - Próxima tarea concreta: F2.
+
+### F2 · Simulador determinista
+- Estado: completa.
+- Fecha: 2026-11-23.
+- Cambio entregado: cola de eventos con orden documentado (D3), ventanas `rolling`/`calendar` (zona explícita, días de 23/25 h)/`concurrency`/`total`, peticiones, tokens y dinero en enteros (`tariffs.py`, `cost_micro`, tarifa versionada), dependencias, resultados inválidos, errores, 429 con pausa y `Retry-After` (D8), cancelación (D9), caída y vuelta del cliente, consumo real distinto de la estimación con liquidación en la ventana de admisión (D2), horizonte (D4), `metrics.py` con objetivos separados. La política solo recibe estimaciones; el simulador revela el intento al terminar.
+- Pruebas ejecutadas: `.\.venv\Scripts\python.exe -m pytest -q` → `36 passed, 1 skipped`; `ruff check` limpio.
+- Evidencia reproducible: `tests/test_f2_sim.py` — llegadas simultáneas (orden de traza, mismo resultado al repetir), medianoche en Europe/Zurich (aplazamiento `capacity_exhausted` con reconsideración exacta a las 00:00 locales; las llamadas que cruzan la medianoche cuentan en el día anterior), día de cambio de hora de 23 h, tokens insuficientes (`rate_limited`, disponible 2000, reconsideración t=60) y paso que nunca cabe (`never_fits` con acción sugerida), cancelación (paso en curso consume, paso futuro `cancelled`), dependencia fallida tras `max_attempts`, doble límite (rpm libera en 60, tpm en 90; motivo vinculante tpm y arranque en 90), sin bucle cuando nada es elegible, reinicio de cliente, 429 con pausa hasta t=31, consumo real superior/inferior a la estimación, presupuesto monetario entero, misma semilla → misma secuencia de decisiones y mismas métricas.
+- Supuesto o limitación: el aplazamiento por pausa de cliente no tiene hora de reconsideración (depende de un evento externo). Una pausa por 429 se aplica al modelo completo.
+- Próxima tarea concreta: F3.

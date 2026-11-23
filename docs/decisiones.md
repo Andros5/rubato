@@ -50,3 +50,22 @@ aplazamiento es `deadline_reserve` e incluye necesidad, disponible y retenido.
 
 Si un paso choca con varios límites, el motivo publicado es el del límite que se
 libera **más tarde** (el que realmente fija la espera); `value.blocks` conserva todos.
+
+## D7 · Topes estrictos frente a estimaciones
+
+Al admitir se reserva `maximum` (p. ej. el máximo de tokens de salida que fija el
+adaptador) si existe; si solo hay `estimate`, el tope es **orientativo**: el consumo
+real puede superarlo (prueba `test_money_budget_in_integer_micro_units_with_versioned_tariff`).
+El servicio (F5) rechaza la admisión estricta sin máximo exigible o la etiqueta como
+orientativa. El dinero se guarda en enteros `cost_micro` con tarifas versionadas.
+
+## D8 · Pausas del proveedor
+
+Un intento con estado `rate_limited` (HTTP 429) pausa el ámbito `("model", m)` hasta
+`fin + retry_after` (1 unidad si no hay cabecera). Mientras dura, los pasos de ese
+modelo se aplazan con `provider_pause` y hora de reconsideración = fin de la pausa.
+
+## D9 · Cancelación
+
+Cancelar cierra los pasos futuros (`cancelled`). Un intento ya iniciado sigue la
+semántica del proveedor: termina y su consumo se liquida.
