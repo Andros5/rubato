@@ -164,3 +164,19 @@
   - `deploy/k8s/secrets.env.example` nunca entró en Git por la regla `*secret*`; ahora se versiona.
 - Pruebas ejecutadas: `RUBATO_TEST_CLOCK=1 docker compose up -d --build` y después `pytest -q` con servicio, control de Compose, DSN y datos privados → **132 passed, 0 skipped**; sin servicio → `113 passed, 19 skipped`; `ruff check` y `ruff format --check` limpios; `python -m build` → `rubato-1.0.1-py3-none-any.whl` (SHA-256 `b453f44a…3e52`) y `rubato-1.0.1.tar.gz` (`26d0fd61…1333`).
 - Próxima tarea concreta: la lista «Siguiente tarea» del principio.
+
+### Versión 1.1.0: panel en vivo y modos desde el servicio (2026-11-23)
+- Estado: completa. Etiqueta local `v1.1.0`; no publicada.
+- Cambio entregado:
+  - Panel `/panel`: cuota por recurso (fondo, urgente e incierto), cola y motivos de espera por cliente, últimas decisiones, intentos inciertos con conciliación en un clic, editor de política y avisos (inciertos, pausas, cuota por debajo del 10 %). Es autocontenido, escapa todo el texto y funciona en móvil.
+  - Migración `0003_client_mode.sql`, `GET /v1/mode`, `PUT /v1/admin/clients/{id}/mode` y `GET /v1/admin/overview`.
+  - Modo `auto` en el SDK y en los adaptadores: radar `65a9672`, CitaLab `0f98803`, ambos en sus ramas `rubato-adapter`.
+  - `rubato shadow-report`.
+  - Corrección: una petición filtrada por paso libera los permisos especulativos del planificador para otros pasos del mismo cliente (antes, con una ranura, esperaba hasta 60 s).
+- Pruebas ejecutadas:
+  - Pila limpia de Compose (`down -v`, `RUBATO_TEST_CLOCK=1 up --build`, esquema `0003_client_mode.sql`) y `pytest -q` con servicio, control de Compose, DSN y datos privados → **140 passed**.
+  - `ruff check` y `ruff format --check` limpios.
+  - Radar, rama `rubato-adapter`: 109 pruebas de las rutas afectadas en verde; contra el servicio real, tras poner `enforce` en el panel, el adaptador en modo `auto` devolvió `enforce`.
+  - CitaLab, rama `rubato-adapter`: suite completa en verde y `reproduce.py` → «todo coincide con lo publicado».
+  - Panel revisado en el navegador integrado con datos de demostración, en escritorio y en móvil (375 px).
+- Próxima tarea concreta: activar `RADAR_RUBATO_MODE=auto` en el radar con el servicio levantado, poner `shadow` desde el panel y, tras al menos 3 jornadas, ejecutar `rubato shadow-report data/integrations/rubato-shadow.jsonl`.

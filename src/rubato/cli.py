@@ -111,6 +111,14 @@ def cmd_evaluate(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_shadow_report(a: argparse.Namespace) -> int:
+    from .shadow import shadow_report, to_text
+
+    r = shadow_report(a.file)
+    print(json.dumps(r, indent=2) if a.json else to_text(r))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from . import __version__
 
@@ -160,6 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--deadline-minutes", type=int, default=60)
     s.add_argument("--out", default="private/eval")
     s.set_defaults(fn=cmd_evaluate)
+
+    s = sub.add_parser("shadow-report", help="agreement, divergences and added latency of a shadow phase")
+    s.add_argument("file", help="JSONL written by an adapter in shadow mode")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_shadow_report)
 
     s = sub.add_parser("init-demo", help="copy the synthetic example files into DIR/examples")
     s.add_argument("dir", nargs="?", default=".")

@@ -38,7 +38,17 @@ Escribe una traza `rubato.trace/v1` (ver `docs/trazas.md`) o genera una con
 `rubato synth --seed 1 --out mi.jsonl`. Marca la procedencia de cada llegada:
 `observed`, `derived`, `synthetic` o `hypothetical`. El informe nunca las mezcla.
 
-## 4. Coordinar aplicaciones
+## 4. Panel en vivo
+
+Con el servicio levantado, abre `http://127.0.0.1:8000/panel` e introduce el token de
+administración. Verás la cuota por recurso (fondo, urgente, incierto), la cola y los
+motivos de espera por cliente, las últimas decisiones y los intentos inciertos (se
+concilian con un botón). Desde ahí cambias la política y el **modo de cada cliente**:
+las aplicaciones arrancadas con `RADAR_RUBATO_MODE=auto` / `CITALAB_RUBATO_MODE=auto`
+(o `Gate(..., mode="auto")`) lo aplican en 30 s, sin reiniciarse. Para decidir si pasar
+de `shadow` a `enforce`: `rubato shadow-report data/integrations/rubato-shadow.jsonl`.
+
+## 5. Coordinar aplicaciones
 
 `docker compose up --build -d` levanta el servicio. Cada aplicación usa el SDK:
 

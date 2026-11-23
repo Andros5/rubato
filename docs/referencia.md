@@ -11,6 +11,7 @@
 | `explain --run DIR --job ID [--policy P]` | Todas las decisiones sobre un trabajo. |
 | `evaluate --trace F --profile F [--policies-file F] [--pilot F] [--deadline-minutes N] [--out DIR]` | Bloques diseño/ajuste/prueba con veredicto. |
 | `import-radar --radar-dir D --from YYYY-MM-DD --to YYYY-MM-DD [--out private]` | Importación en solo lectura del historial del radar (privado). |
+| `shadow-report FILE [--json]` | Coincidencias, divergencias por motivo, latencia añadida y si hay evidencia suficiente para `enforce`. |
 | `demo-service [--api URL --provider URL --*-token T]` | Dos clientes comparten cuota en un servicio en marcha. |
 | `--version` | Versión. |
 
@@ -38,6 +39,10 @@ Políticas: `fifo` (orden de llegada), `radar` (prioridad y elegibilidad, refere
 | `GET /v1/admin/attempts?state=` | (admin) Intentos por estado, p. ej. `unknown`. |
 | `POST /v1/admin/schedule` | (admin) Fuerza una ronda. |
 | `POST /v1/admin/clock`, `POST /v1/admin/reset` | Solo con `RUBATO_TEST_CLOCK=1` (entornos de prueba). |
+| `GET /v1/mode` | Modo que el administrador fijó para el cliente que llama (`off`, `shadow`, `enforce`). |
+| `PUT /v1/admin/clients/{id}/mode` | (admin) `{mode}`; queda en `events`. |
+| `GET /v1/admin/overview` | (admin) Todo lo que muestra el panel en una lectura. |
+| `GET /panel` | Panel en vivo (página autocontenida; pide el token de administración). |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` | Operación. |
 
 Variables: `RUBATO_DSN`, `RUBATO_CLIENTS` (`id:token:rol:ranuras,…`),

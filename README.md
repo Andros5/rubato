@@ -19,7 +19,7 @@ simulator: no keys, no cost.
 
 ```powershell
 py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install rubato-1.0.1-py3-none-any.whl   # or: pip install -e ".[dev]" from a clone
+.\.venv\Scripts\python.exe -m pip install rubato-1.1.0-py3-none-any.whl   # or: pip install -e ".[dev]" from a clone
 .\.venv\Scripts\rubato.exe init-demo .            # copies examples/ (synthetic trace, scenarios, frozen policies)
 .\.venv\Scripts\rubato.exe simulate --trace examples/demo.jsonl --scenario urgencia-tardia --policies radar,reserva --out runs/demo
 .\.venv\Scripts\rubato.exe compare --run runs/demo --report informe.html
@@ -58,6 +58,12 @@ docker compose up --build -d          # PostgreSQL, API, planner, simulated prov
 
 Without `RUBATO_TEST_CLOCK=1` the stack starts in normal mode (no reset or clock
 endpoints): that is the mode an application in `shadow` or `enforce` should talk to.
+
+Open **http://127.0.0.1:8000/panel** (administrator token) for the live panel: quota per
+resource, queue and waiting reasons per client, latest decisions, uncertain attempts with
+one-click reconciliation, the active policy, and the `off` / `shadow` / `enforce` switch of
+each client. Applications started with mode `auto` follow that switch within 30 s.
+`rubato shadow-report <file>` summarises a shadow phase (agreement, divergences, added latency).
 
 Clients register jobs, ask for a permit (`POST /v1/claims`), confirm the start before
 calling the provider and settle the real usage afterwards. Each client can run in
