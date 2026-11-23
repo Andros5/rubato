@@ -32,6 +32,33 @@ class Status(StrEnum):
     CANCELLED = "cancelled"
 
 
+def find_cycle(deps: dict[str, list[str] | tuple[str, ...]]) -> list[str] | None:
+    """Return one dependency cycle among step ids, or None."""
+    state: dict[str, int] = {}
+    path: list[str] = []
+
+    def visit(n: str) -> list[str] | None:
+        state[n] = 1
+        path.append(n)
+        for d in deps.get(n, ()):
+            if state.get(d) == 1:
+                return path[path.index(d) :] + [d]
+            if state.get(d) is None and d in deps:
+                found = visit(d)
+                if found:
+                    return found
+        path.pop()
+        state[n] = 2
+        return None
+
+    for n in deps:
+        if state.get(n) is None:
+            found = visit(n)
+            if found:
+                return found
+    return None
+
+
 def tokens_total(usage: dict[str, int]) -> dict[str, int]:
     """Return usage with ``tokens_total`` filled in when both halves are known."""
     if "tokens_total" in usage:

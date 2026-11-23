@@ -124,7 +124,7 @@ def main() -> int:
             f"RUBATO_DSN=postgresql://rubato:{DSN_PW}@host.docker.internal:55433/rubato",
             "-e",
             "RUBATO_TEST_CLOCK=1",
-            "rubato:1.0.0",
+            "rubato:1.0.1",
         )
         assert wait("http://127.0.0.1:8002/readyz"), "restored API not ready"
         a2, r2 = c("admin", "http://127.0.0.1:8002"), c("radar", "http://127.0.0.1:8002")

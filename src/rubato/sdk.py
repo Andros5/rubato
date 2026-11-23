@@ -235,7 +235,10 @@ class Gate:
         try:
             value, out = call()
         except Exception:
-            self.client.finish(aid, "error", {"requests": 1})
+            try:  # conservative: the request may have reached the provider
+                self.client.finish(aid, "error", {"requests": 1})
+            except Exception as settle_error:  # keep the application's error; Rubato marks it unknown later
+                log.warning("rubato: could not settle failed attempt %s: %s", aid, settle_error)
             raise
         self.client.finish(aid, out.status, out.usage, out.receipt, out.retry_after)
         return GateResult(True, "enforce", value, attempt=aid, waited_s=waited)

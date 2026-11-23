@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.1 — 2026-11-23 (local release, not published) — audit
+
+### Performance
+- Ledger keeps entries sorted by admission instant and indexed by attempt: window
+  queries are binary searches (calendar windows convert the time zone once per query,
+  not once per entry) and each decision round uses a light tentative overlay instead of
+  copying the ledger. The simulator only iterates active jobs. One week of the radar
+  history (2,133 jobs) simulates in 1.45 s instead of 17.2 s (p95 per round 0.54 ms
+  instead of 7.5 ms) with identical decisions and metrics; the date-block evaluation
+  takes 3.7 s instead of ~34 s with identical results.
+
+### Fixes
+- Dependency cycles between steps are rejected by the trace loader, the simulator and the
+  service (they used to leave the job waiting forever without a reason).
+- Service: strict validation of job registrations (types, ranges, at most 100 steps) and
+  of `slots`; occupied concurrency slots count whatever their age (they were dropped
+  after the 3-day ledger lookback); Prometheus label values are escaped.
+- HTML report: every trace-derived text inserted as HTML is escaped (a crafted job id
+  could inject markup or script).
+- SDK: when the provider call fails and Rubato cannot settle, the application's error is
+  raised instead of Rubato's.
+- Compose starts in normal mode; the reset and clock endpoints need `RUBATO_TEST_CLOCK=1`.
+- `deploy/k8s/secrets.env.example` was ignored by Git (`*secret*` rule); now tracked.
+- `scripts/ops/k8s_up.ps1` stops on native command failures and loads the image as a
+  single-platform archive (Docker's containerd image store breaks `kind load docker-image`).
+
 ## 1.0.0 — 2026-11-23 (local release, not published)
 
 ### Simulator

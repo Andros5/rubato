@@ -256,3 +256,14 @@ def test_a_claim_for_one_step_does_not_grant_another_step_of_the_same_client():
         assert [
             a["job_id"] for a in ok(client("admin").get("/v1/admin/attempts", params={"state": "granted"}))
         ] == ["radar:newer"]
+
+
+def test_a_long_running_attempt_keeps_its_concurrency_slot_past_the_ledger_lookback():
+    reset([{"id": "workers", "unit": "concurrent", "capacity": 1, "window": "concurrency"}])
+    with client("radar") as c:
+        ok(c.post("/v1/jobs", json=job("long")), 201)
+        ok(c.post("/v1/jobs", json=job("next")), 201)
+        p = ok(c.post("/v1/claims", json={"job": "long", "step": "s"}))["permit"]
+        ok(c.post(f"/v1/attempts/{p['attempt']}/start"))
+        advance(4 * 86400)  # beyond the 3-day ledger lookback; the call has not been settled
+        assert ok(c.post("/v1/claims", json={"job": "next", "step": "s"}))["permit"] is None

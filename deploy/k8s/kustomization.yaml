@@ -21,4 +21,4 @@ secretGenerator:
     envs: [secrets.env]
 images:
   - name: rubato
-    newTag: 1.0.0
+    newTag: 1.0.1

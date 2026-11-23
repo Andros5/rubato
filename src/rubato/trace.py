@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .model import Job, Outcome, Provenance, Status, Step
+from .model import Job, Outcome, Provenance, Status, Step, find_cycle
 from .resources import WINDOW_KINDS, ResourceSpec
 from .sim import ExternalEvent
 
@@ -153,6 +153,9 @@ def _job(d: dict, line: int) -> Job:
         for dep in s.depends_on:
             if dep not in ids:
                 raise _err(line, where, f"step {s.id!r} depends on unknown step {dep!r}")
+    cycle = find_cycle({s.id: s.depends_on for s in steps})
+    if cycle:
+        raise _err(line, where, "dependency cycle " + " -> ".join(cycle))
     prov = _prov(d.get("provenance"), line, where)
     if "arrival" not in prov:
         raise _err(

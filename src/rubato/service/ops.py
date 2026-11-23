@@ -18,6 +18,11 @@ def _route(path: str) -> str:
     return "/" + "/".join(parts)
 
 
+def _esc(v) -> str:
+    """Escape a Prometheus label value: backslash, double quote and newline."""
+    return str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 def observe_request(path: str, method: str, status: int, seconds: float) -> None:
     r = _route(path)
     with _lock:
@@ -33,7 +38,7 @@ def render_metrics(conn) -> str:
         lines.append(f"# HELP {name} {help_}")
         lines.append(f"# TYPE {name} gauge")
         for labels, v in rows:
-            lab = ",".join(f'{k}="{val}"' for k, val in labels.items())
+            lab = ",".join(f'{k}="{_esc(val)}"' for k, val in labels.items())
             lines.append(f"{name}{{{lab}}} {v}" if lab else f"{name} {v}")
 
     from .store import now

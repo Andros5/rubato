@@ -9,6 +9,7 @@ not leak into the new window.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -90,7 +91,13 @@ class Entry:
 
 
 class Ledger:
-    """In-memory ledger used by the simulator. The service keeps the same rules in PostgreSQL."""
+    """In-memory ledger used by the simulator and rebuilt per round by the service.
+
+    Entries are kept sorted by admission instant, so each window query is a binary
+    search instead of a scan of the whole history (calendar windows convert the time
+    zone once per query, not once per entry). An index by attempt makes settlement
+    O(entries of that attempt). Released concurrency slots are dropped from the list.
+    """
 
     def __init__(self, specs: list[ResourceSpec]):
         ids = [s.id for s in specs]
@@ -98,24 +105,45 @@ class Ledger:
             raise ValueError("duplicate resource ids")
         self.specs = {s.id: s for s in specs}
         self.entries: dict[str, list[Entry]] = {s.id: [] for s in specs}
+        self._times: dict[str, list[int]] = {s.id: [] for s in specs}
+        self._by_attempt: dict[str, list[Entry]] = {}
 
+    # -- storage -------------------------------------------------------------
+    def add(self, e: Entry) -> Entry:
+        times = self._times[e.resource]
+        i = bisect_right(times, e.t)
+        times.insert(i, e.t)
+        self.entries[e.resource].insert(i, e)
+        self._by_attempt.setdefault(e.attempt_id, []).append(e)
+        return e
+
+    def book(self, rid: str, t: int, amount: int, attempt_id: str, urgent: bool, client: str) -> Entry:
+        return self.add(Entry(rid, t, amount, attempt_id, urgent, client))
+
+    def _drop(self, e: Entry) -> None:
+        es, times = self.entries[e.resource], self._times[e.resource]
+        i = bisect_left(times, e.t)
+        while es[i] is not e:
+            i += 1
+        del es[i], times[i]
+
+    # -- queries -------------------------------------------------------------
     def _live(self, rid: str, t: int) -> list[Entry]:
-        spec = self.specs[rid]
-        es = [e for e in self.entries[rid] if e.state != "released" and e.t <= t]
+        spec, es, times = self.specs[rid], self.entries[rid], self._times[rid]
+        hi = bisect_right(times, t)
         if spec.window == "rolling":
             assert spec.length
-            return [e for e in es if e.t > t - spec.length]
-        if spec.window == "calendar":
-            start = spec.window_start(t)
-            return [e for e in es if spec.window_start(e.t) == start]
-        if spec.window == "concurrency":
-            return [e for e in es if e.state in ("reserved", "unknown")]
-        return es
+            lo = bisect_right(times, t - spec.length)
+        elif spec.window == "calendar":
+            lo = bisect_left(times, spec.window_start(t))
+        else:  # total, concurrency (released slots are removed on settlement)
+            lo = 0
+        return [e for e in es[lo:hi] if e.state != "released"]
 
     def used(self, rid: str, t: int, *, urgent: bool | None = None) -> int:
         es = self._live(rid, t)
         if urgent is not None:
-            es = [e for e in es if e.urgent == urgent]
+            return sum(e.amount for e in es if e.urgent == urgent)
         return sum(e.amount for e in es)
 
     def available(self, rid: str, t: int) -> int:
@@ -130,12 +158,13 @@ class Ledger:
         spec = self.specs[rid]
         if amount > spec.capacity:
             return NEVER
-        used = self.used(rid, t)
+        live = self._live(rid, t)  # sorted by admission instant
+        used = sum(e.amount for e in live)
         if used + amount <= spec.capacity:
             return t
         if spec.window == "rolling":
             assert spec.length
-            for e in sorted(self._live(rid, t), key=lambda e: e.t):
+            for e in live:
                 used -= e.amount
                 if used + amount <= spec.capacity:
                     return e.t + spec.length
@@ -147,36 +176,56 @@ class Ledger:
         return NEVER
 
     def overlay(self) -> Ledger:
-        """Copy whose new bookings do not touch this ledger (tentative allocations of a round)."""
-        other = Ledger.__new__(Ledger)
-        other.specs = self.specs
-        other.entries = {rid: list(es) for rid, es in self.entries.items()}
-        return other
+        """Tentative view for one decision round: new bookings stay out of this ledger."""
+        return _Overlay(self)
 
-    def book(self, rid: str, t: int, amount: int, attempt_id: str, urgent: bool, client: str) -> Entry:
-        e = Entry(rid, t, amount, attempt_id, urgent, client)
-        self.entries[rid].append(e)
-        return e
-
+    # -- settlement ----------------------------------------------------------
     def settle(self, attempt_id: str, usage: dict[str, int] | None, state: str = "confirmed") -> None:
         """Adjust every entry of an attempt to its confirmed usage (kept in the original window)."""
-        for rid, es in self.entries.items():
-            spec = self.specs[rid]
-            for e in es:
-                if e.attempt_id != attempt_id or e.state == "released":
-                    continue
-                if spec.window == "concurrency":
-                    e.state = "released"
-                    continue
-                if usage is not None and spec.unit in usage:
-                    e.amount = int(usage[spec.unit])
-                e.state = state
+        for e in self._by_attempt.get(attempt_id, []):
+            if e.state == "released":
+                continue
+            spec = self.specs[e.resource]
+            if spec.window == "concurrency":
+                e.state = "released"
+                self._drop(e)
+                continue
+            if usage is not None and spec.unit in usage:
+                e.amount = int(usage[spec.unit])
+            e.state = state
 
     def release(self, attempt_id: str) -> None:
-        for es in self.entries.values():
-            for e in es:
-                if e.attempt_id == attempt_id:
-                    e.state = "released"
+        for e in self._by_attempt.get(attempt_id, []):
+            if e.state != "released":
+                e.state = "released"
+                if self.specs[e.resource].window == "concurrency":
+                    self._drop(e)
 
     def consumed(self, rid: str) -> int:
         return sum(e.amount for e in self.entries[rid] if e.state in ("confirmed", "unknown"))
+
+
+class _Overlay(Ledger):
+    """Base ledger plus the tentative bookings of the current round (all at ``now``)."""
+
+    def __init__(self, base: Ledger):
+        self.specs = base.specs
+        self.base = base
+        self.extra: dict[str, list[Entry]] = {rid: [] for rid in base.specs}
+
+    def add(self, e: Entry) -> Entry:
+        self.extra[e.resource].append(e)
+        return e
+
+    def _live(self, rid: str, t: int) -> list[Entry]:
+        live = self.base._live(rid, t)
+        extra = [e for e in self.extra[rid] if e.t <= t]
+        return live + extra if extra else live
+
+    def overlay(self) -> Ledger:
+        return _Overlay(self)
+
+    def settle(self, attempt_id, usage, state="confirmed"):  # pragma: no cover - rounds never settle
+        raise NotImplementedError("an overlay only holds tentative bookings")
+
+    release = settle

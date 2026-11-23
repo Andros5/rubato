@@ -27,7 +27,7 @@ from dataclasses import dataclass
 import psycopg
 
 from ..core import Capacity, Demand, decidir
-from ..model import Action, ReadyItem, Reason, tokens_total
+from ..model import Action, ReadyItem, Reason, find_cycle, tokens_total
 from ..policies import RadarPolicy, make_policy
 from ..resources import Entry, Ledger, ResourceSpec
 
@@ -238,21 +238,56 @@ def _meta(meta) -> dict:
     }
 
 
-def register_job(conn, client: dict, body: dict) -> dict:
-    t = now(conn)
+def _int(v, what: str, lo: int = 0, hi: int = 2**62, nullable: bool = False) -> int | None:
+    if v is None and nullable:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+        raise ApiError(422, "invalid", f"{what} must be an integer between {lo} and {hi}")
+    return v
+
+
+def _validate_job(body: dict) -> None:
+    """Reject malformed registrations with a 422 before touching the database."""
+    if not isinstance(body, dict):
+        raise ApiError(422, "invalid", "the job must be a JSON object")
     cjid = body.get("id")
-    if not cjid or not isinstance(cjid, str):
-        raise ApiError(422, "invalid", "job 'id' (stable client id) is required")
-    steps = body.get("steps") or []
-    if not steps:
-        raise ApiError(422, "invalid", "a job needs at least one step")
+    if not isinstance(cjid, str) or not cjid or len(cjid) > 200:
+        raise ApiError(422, "invalid", "job 'id' (stable client id, 1-200 characters) is required")
+    if not isinstance(body.get("class", "default"), str):
+        raise ApiError(422, "invalid", "'class' must be a string")
+    if not isinstance(body.get("urgent", False), bool):
+        raise ApiError(422, "invalid", "'urgent' must be true or false")
+    _int(body.get("priority", 0), "'priority'", -1000, 1000)
+    _int(body.get("deadline"), "'deadline'", nullable=True)
+    steps = body.get("steps")
+    if not isinstance(steps, list) or not steps or len(steps) > 100:
+        raise ApiError(422, "invalid", "a job needs between 1 and 100 steps")
+    if not all(isinstance(s, dict) for s in steps):
+        raise ApiError(422, "invalid", "each step must be an object")
     sids = [s.get("id") for s in steps]
-    if len(set(sids)) != len(sids) or not all(sids):
-        raise ApiError(422, "invalid", "step ids must be unique and non-empty")
+    if not all(isinstance(x, str) and x for x in sids) or len(set(sids)) != len(sids):
+        raise ApiError(422, "invalid", "step ids must be unique non-empty strings")
     for s in steps:
-        for d in s.get("depends_on") or []:
+        deps = s.get("depends_on") or []
+        if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
+            raise ApiError(422, "invalid", f"step {s['id']!r}: 'depends_on' must be a list of step ids")
+        for d in deps:
             if d not in sids:
                 raise ApiError(422, "invalid", f"step {s['id']!r} depends on unknown step {d!r}")
+        if s.get("model") is not None and not isinstance(s["model"], str):
+            raise ApiError(422, "invalid", f"step {s['id']!r}: 'model' must be a string")
+        _int(s.get("duration_estimate", 1), f"step {s['id']!r}: 'duration_estimate'", 0, 86400 * 7)
+        _int(s.get("max_attempts", 1), f"step {s['id']!r}: 'max_attempts'", 1, 50)
+    cycle = find_cycle({s["id"]: s.get("depends_on") or [] for s in steps})
+    if cycle:
+        raise ApiError(422, "invalid", "dependency cycle " + " -> ".join(cycle))
+
+
+def register_job(conn, client: dict, body: dict) -> dict:
+    _validate_job(body)
+    t = now(conn)
+    cjid = body["id"]
+    steps = body["steps"]
     allowed = client["models"] or []
     jid = f"{client['id']}:{cjid}"
     existing = conn.execute("SELECT id FROM jobs WHERE id=%s", (jid,)).fetchone()
@@ -461,11 +496,12 @@ def _snapshot(conn, t: int) -> tuple[list[ResourceSpec], Capacity]:
     ledger = Ledger(specs)
     rows = conn.execute(
         "SELECT l.* FROM ledger l JOIN resources r ON r.id=l.resource_id WHERE l.state <> 'released' "
-        "AND (r.win = 'total' OR l.t > %s)",
+        # total windows and occupied concurrency slots count whatever their age
+        "AND (r.win IN ('total', 'concurrency') OR l.t > %s)",
         (t - LOOKBACK,),
     ).fetchall()
     for r in rows:
-        ledger.entries[r["resource_id"]].append(
+        ledger.add(
             Entry(
                 r["resource_id"],
                 int(r["t"]),
@@ -700,6 +736,8 @@ def claim(
     step: str | None = None,
     shadow: bool = False,
 ) -> dict:
+    if slots is not None:
+        _int(slots, "'slots'", 0, 1000)
     lock(conn)
     t = now(conn)
     if shadow:
