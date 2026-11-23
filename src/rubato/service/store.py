@@ -768,6 +768,22 @@ def claim(
     if slots is not None:
         conn.execute("UPDATE clients SET slots=%s WHERE id=%s", (slots, client["id"]))
     conn.execute("UPDATE clients SET available_until=%s WHERE id=%s", (t + EXECUTOR_TTL, client["id"]))
+    if job and step:
+        # A worker asking for one specific step: permits the background planner granted to
+        # this client for other steps were never handed to anyone; give their slot back.
+        spec_grants = conn.execute(
+            "UPDATE attempts SET state='released' WHERE client_id=%s AND state='granted' AND NOT delivered "
+            "AND NOT (job_id=%s AND step_id=%s) RETURNING id, job_id, step_id",
+            (client["id"], job, step),
+        ).fetchall()
+        for a in spec_grants:
+            conn.execute(
+                "UPDATE ledger SET state='released', updated_at=%s WHERE attempt_id=%s", (t, a["id"])
+            )
+            conn.execute(
+                "UPDATE steps SET state='ready' WHERE job_id=%s AND step_id=%s AND state='granted'",
+                (a["job_id"], a["step_id"]),
+            )
     schedule_pass(conn, t, focus=(client["id"], job, step) if job and step else None)
     a = conn.execute(
         "SELECT a.*, s.model, s.maximum, s.estimate FROM attempts a JOIN steps s ON s.job_id=a.job_id AND s.step_id=a.step_id "
@@ -1105,3 +1121,97 @@ def new_token() -> str:
 class Health:
     ok: bool
     schema: str | None
+
+
+# ---------------------------------------------------------------------------- modes and overview
+
+MODES = ("off", "shadow", "enforce")
+
+
+def get_mode(conn, client: dict) -> dict:
+    r = conn.execute("SELECT mode, mode_changed_at FROM clients WHERE id=%s", (client["id"],)).fetchone()
+    return {"client": client["id"], "mode": r["mode"], "changed_at": r["mode_changed_at"]}
+
+
+def set_mode(conn, admin: dict, cid: str, mode: str) -> dict:
+    if mode not in MODES:
+        raise ApiError(422, "invalid", f"mode must be one of {MODES}")
+    t = now(conn)
+    row = conn.execute(
+        "UPDATE clients SET mode=%s, mode_changed_at=%s WHERE id=%s AND role='client' RETURNING id",
+        (mode, t, cid),
+    ).fetchone()
+    if not row:
+        raise ApiError(404, "not_found", f"client {cid!r} not found")
+    event(conn, t, "mode_changed", cid, payload={"mode": mode, "by": admin["id"]})
+    return {"client": cid, "mode": mode, "changed_at": t}
+
+
+def overview(conn, decisions_limit: int = 60) -> dict:
+    """Everything the live panel shows, in one read-only snapshot."""
+    t = now(conn)
+    specs, cap = _snapshot(conn, t)
+    resources = []
+    for s in specs:
+        unknown = sum(e.amount for e in cap.ledger.entries[s.id] if e.state == "unknown")
+        nxt = None
+        if s.window == "calendar":
+            nxt = s.next_reset(t)
+        resources.append(
+            {
+                "id": s.id,
+                "unit": s.unit,
+                "window": s.window,
+                "capacity": s.capacity,
+                "scope": s.scope,
+                "used": cap.ledger.used(s.id, t),
+                "available": cap.ledger.available(s.id, t),
+                "used_urgent": cap.ledger.used(s.id, t, urgent=True),
+                "unknown": unknown,
+                "resets_at": nxt,
+            }
+        )
+    clients = conn.execute(
+        "SELECT id, mode, mode_changed_at, slots, available_until FROM clients WHERE role='client' ORDER BY id"
+    ).fetchall()
+    queue = conn.execute(
+        "SELECT j.client_id, s.state, count(*) AS n, min(s.ready_since) AS oldest FROM steps s "
+        "JOIN jobs j ON j.id=s.job_id WHERE j.state='active' GROUP BY 1, 2"
+    ).fetchall()
+    reasons = conn.execute(
+        "SELECT j.client_id, s.last_reason, count(*) AS n, min(s.next_reconsider) AS next FROM steps s "
+        "JOIN jobs j ON j.id=s.job_id WHERE j.state='active' AND s.state='ready' AND s.last_reason IS NOT NULL "
+        "GROUP BY 1, 2 ORDER BY 3 DESC"
+    ).fetchall()
+    waiting = conn.execute(
+        "SELECT s.job_id, s.step_id, j.client_id, j.cls, j.urgent, j.deadline, s.ready_since, s.last_reason, "
+        "s.next_reconsider FROM steps s JOIN jobs j ON j.id=s.job_id WHERE j.state='active' AND s.state='ready' "
+        "ORDER BY j.urgent DESC, s.ready_since LIMIT 50"
+    ).fetchall()
+    recent = conn.execute(
+        "SELECT d.id, d.t, d.job_id, d.step_id, d.attempt, d.policy, d.action, d.reason, d.detail, d.next_t "
+        "FROM decisions d ORDER BY d.id DESC LIMIT %s",
+        (decisions_limit,),
+    ).fetchall()
+    unknown = conn.execute(
+        "SELECT id, job_id, step_id, n, client_id, admitted, started_at FROM attempts WHERE state='unknown' "
+        "ORDER BY started_at"
+    ).fetchall()
+    pauses = conn.execute("SELECT * FROM pauses WHERE until > %s ORDER BY until", (t,)).fetchall()
+    policy, version = load_policy(conn)
+    totals = conn.execute(
+        "SELECT state, count(*) AS n FROM jobs WHERE created_at > %s GROUP BY 1", (t - 86400,)
+    ).fetchall()
+    return {
+        "t": t,
+        "resources": resources,
+        "clients": clients,
+        "queue": queue,
+        "reasons": reasons,
+        "waiting": waiting,
+        "decisions": recent,
+        "unknown_attempts": unknown,
+        "pauses": pauses,
+        "policy": {"label": policy.label, "version": version, "config": policy.config()},
+        "jobs_last_24h": {r["state"]: r["n"] for r in totals},
+    }
