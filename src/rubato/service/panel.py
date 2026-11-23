@@ -49,8 +49,9 @@ button{cursor:pointer}button.primary{background:var(--c1);color:#fff;border-colo
  </div>
  <div class="card" style="margin-top:14px"><h2>Fase shadow (24 h)</h2><table id="shadow"></table><p class="sub">Qué habría decidido Rubato en las llamadas que los clientes en shadow hicieron por su cuenta. «Aplazaría» = divergencia.</p></div>
  <div class="card" style="margin-top:14px"><h2>Intentos inciertos</h2><table id="unknown"></table></div>
- <div class="card" style="margin-top:14px"><h2>Pasos en espera</h2><table id="waiting"></table></div>
- <div class="card" style="margin-top:14px"><h2>Últimas decisiones</h2><table id="decisions"></table></div>
+ <div class="card" style="margin-top:14px"><h2>Pasos en espera</h2><p class="sub">Pulsa una fila para ver su ficha.</p><table id="waiting"></table></div>
+ <div class="card" style="margin-top:14px" id="cardbox" hidden><h2>Ficha del trabajo <button id="cardclose" style="float:right">Cerrar</button></h2><pre id="card" style="white-space:pre-wrap;font:12px/1.5 ui-monospace,Consolas,monospace;margin:0"></pre></div>
+ <div class="card" style="margin-top:14px"><h2>Últimas decisiones</h2><p><select id="fcl"><option value="">todos los clientes</option></select> <label class="sub"><input type="checkbox" id="fdef"> solo aplazamientos y cierres</label></p><table id="decisions"></table></div>
 </section></main>
 <script>
 const $=id=>document.getElementById(id);
@@ -85,8 +86,18 @@ async function load(){let d;try{d=await api('GET','/v1/admin/overview')}catch(e)
  document.querySelectorAll('button[data-rec]').forEach(b=>b.onclick=async()=>{const consumed=b.dataset.c==='1';
   if(!confirm(consumed?'Confirmar que el proveedor procesó la llamada (se mantiene el consumo reservado).':'Confirmar que el proveedor NO la procesó: se libera la reserva y el paso vuelve a la cola.'))return;
   try{await api('POST','/v1/attempts/'+encodeURIComponent(b.dataset.rec)+'/reconcile',{consumed,evidence:'panel'})}catch(e){alert(e.message)}load()});
+ const fc=$('fcl');d.clients.forEach(c=>{if(![...fc.options].some(o=>o.value===c.id)){const o=document.createElement('option');o.value=c.id;o.textContent=c.id;fc.appendChild(o)}});
  $('waiting').innerHTML='<tr><th>Trabajo</th><th>Paso</th><th>Cliente</th><th>Espera</th><th>Motivo</th><th>Revisión</th><th>Plazo</th></tr>'+d.waiting.map(w=>'<tr><td>'+esc(w.job_id)+(w.urgent?' <span class="tag">urgente</span>':'')+'</td><td>'+esc(w.step_id)+'</td><td>'+esc(w.client_id)+'</td><td>'+ago(now,w.ready_since)+'</td><td>'+why(w.last_reason)+'</td><td>'+hhmm(w.next_reconsider)+'</td><td>'+hhmm(w.deadline)+'</td></tr>').join('');
- $('decisions').innerHTML='<tr><th>Hora</th><th>Trabajo / paso</th><th>Decisión</th><th>Motivo</th><th>Detalle</th></tr>'+d.decisions.map(x=>'<tr><td>'+hhmm(x.t)+'</td><td>'+esc(x.job_id)+' / '+esc(x.step_id)+'#'+esc(x.attempt)+'</td><td><span class="tag '+esc(x.action)+'">'+({authorize:'autoriza',defer:'aplaza',close:'cierra'}[x.action]||esc(x.action))+'</span></td><td>'+why(x.reason)+'</td><td class="sub">'+esc(x.detail)+(x.next_t?' · revisar '+hhmm(x.next_t):'')+'</td></tr>').join('');}
+ $('waiting').querySelectorAll('tr').forEach((tr,i)=>{if(i===0)return;tr.style.cursor='pointer';tr.onclick=()=>card(d.waiting[i-1].job_id)});
+ const decs=d.decisions.filter(x=>(!fc.value||x.job_id.startsWith(fc.value+':'))&&(!$('fdef').checked||x.action!=='authorize'));
+ $('decisions').innerHTML='<tr><th>Hora</th><th>Trabajo / paso</th><th>Decisión</th><th>Motivo</th><th>Detalle</th></tr>'+decs.map(x=>'<tr><td>'+hhmm(x.t)+'</td><td>'+esc(x.job_id)+' / '+esc(x.step_id)+'#'+esc(x.attempt)+'</td><td><span class="tag '+esc(x.action)+'">'+({authorize:'autoriza',defer:'aplaza',close:'cierra'}[x.action]||esc(x.action))+'</span></td><td>'+why(x.reason)+'</td><td class="sub">'+esc(x.detail)+(x.next_t?' · revisar '+hhmm(x.next_t):'')+'</td></tr>').join('');}
+async function card(job){try{const ds=await api('GET','/v1/decisions?limit=500&job='+encodeURIComponent(job));const j=await api('GET','/v1/jobs/'+encodeURIComponent(job));
+ const NL=String.fromCharCode(10);
+ let t=j.id+' ('+j.cls+(j.urgent?', urgente':'')+') · estado '+j.state+' · llegada '+hhmm(j.arrival)+(j.deadline?' · plazo '+hhmm(j.deadline):'')+NL;
+ j.steps.forEach(s=>{t+='  paso '+s.step_id+': '+s.state+', intentos '+s.attempts+', motivo '+(REASON[s.last_reason]||s.last_reason||'—')+(s.next_reconsider?', revisión '+hhmm(s.next_reconsider):'')+NL});
+ t+=NL;ds.forEach(x=>{t+=hhmm(x.t)+'  '+x.step_id+'#'+x.attempt+'  '+({authorize:'AUTORIZA',defer:'APLAZA',close:'CIERRA'}[x.action]||x.action)+'  ['+(REASON[x.reason]||x.reason)+']'+(x.detail?NL+'      '+x.detail:'')+(x.action==='defer'&&x.next_t?NL+'      revisar '+hhmm(x.next_t):'')+NL});
+ $('card').textContent=t;$('cardbox').hidden=false;$('cardbox').scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){alert(e.message)}}
+$('cardclose').onclick=()=>{$('cardbox').hidden=true};$('fcl').onchange=load;$('fdef').onchange=load;
 $('lf').onsubmit=e=>{e.preventDefault();token=$('tok').value.trim();sessionStorage.setItem('rubato-admin',token);load()};
 $('logout').onclick=()=>{sessionStorage.removeItem('rubato-admin');token='';show(false)};$('refresh').onclick=load;
 $('pf').onsubmit=async e=>{e.preventDefault();const body={name:$('pname').value};try{if($('preserve').value.trim())body.reserve=JSON.parse($('preserve').value);

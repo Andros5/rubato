@@ -46,6 +46,7 @@ def test_overview_feeds_the_panel():
     page = httpx.get(f"{API}/panel")
     assert page.status_code == 200 and "Rubato · panel" in page.text and "const esc=" in page.text
     assert "https://" not in page.text  # self-contained
+    assert 'id="card"' in page.text and 'id="fdef"' in page.text  # job card and decision filters
 
 
 def fake_service(modes):
