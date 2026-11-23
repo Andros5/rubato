@@ -16,8 +16,8 @@ PANEL_HTML = r"""<!doctype html>
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1200px;margin:0 auto;padding:16px}h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 8px}
 .top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
-.sub{color:var(--ink2);font-size:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
+.sub{color:var(--ink2);font-size:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:14px}
+.card{min-width:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--ink2);font-weight:600;font-size:12px}.num{text-align:right}
 button,select,input{font:inherit;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--soft);color:var(--ink)}
@@ -74,7 +74,7 @@ async function load(){let d;try{d=await api('GET','/v1/admin/overview')}catch(e)
  $('resources').innerHTML=d.resources.map(r=>{const cap=Math.max(1,r.capacity),u=Math.max(0,r.used-r.used_urgent-r.unknown),pct=x=>Math.min(100,100*x/cap);
   return '<div><b>'+esc(r.id)+'</b> <span class="sub">'+esc(r.unit)+' · '+esc(r.window)+(Object.keys(r.scope||{}).length?' · '+esc(JSON.stringify(r.scope)):'')+'</span><span style="float:right">'+esc(r.used)+' / '+esc(r.capacity)+' · quedan <b>'+esc(r.available)+'</b>'+(r.resets_at?' · reinicio '+hhmm(r.resets_at):'')+'</span>'+
   '<div class="bar" role="img" aria-label="'+esc(r.id)+' usado '+esc(r.used)+' de '+esc(r.capacity)+'"><span class="u" style="width:'+pct(u)+'%"></span><span class="g" style="left:'+pct(u)+'%;width:'+pct(r.used_urgent)+'%"></span><span class="x" style="left:'+pct(u+r.used_urgent)+'%;width:'+pct(r.unknown)+'%"></span></div></div>'}).join('')||'<p class="sub">Sin recursos configurados.</p>';
- const cfg=d.policy.config;$('policy').innerHTML='<p>Activa: <b>'+esc(d.policy.label)+'</b>'+(cfg.reserve?' · reserva '+esc(JSON.stringify(cfg.reserve)):'')+(cfg.release_offset!=null?' · libera a '+esc(cfg.release_offset)+' s del reinicio':'')+'</p>';
+ const cfg=d.policy.config;const pf=$('pf');if(!pf.contains(document.activeElement)){$('pname').value=cfg.name;$('preserve').value=cfg.reserve&&Object.keys(cfg.reserve).length?JSON.stringify(cfg.reserve):'';$('prelease').value=cfg.release_offset??''}$('policy').innerHTML='<p>Activa: <b>'+esc(d.policy.label)+'</b>'+(cfg.reserve?' · reserva '+esc(JSON.stringify(cfg.reserve)):'')+(cfg.release_offset!=null?' · libera a '+esc(cfg.release_offset)+' s del reinicio':'')+'</p>';
  const byc={};d.queue.forEach(q=>{(byc[q.client_id]=byc[q.client_id]||{})[q.state]=q.n;if(q.state==='ready')byc[q.client_id].oldest=q.oldest});
  const st=['ready','waiting','granted','running','unknown'];$('queue').innerHTML='<tr><th>Cliente</th>'+st.map(s=>'<th class="num">'+s+'</th>').join('')+'<th>Más antiguo</th></tr>'+Object.entries(byc).map(([c,v])=>'<tr><td>'+esc(c)+'</td>'+st.map(s=>'<td class="num">'+(v[s]||0)+'</td>').join('')+'<td>'+ago(now,v.oldest)+'</td></tr>').join('');
  $('reasons').innerHTML='<tr><th>Cliente</th><th>Motivo</th><th class="num">Pasos</th><th>Próxima revisión</th></tr>'+d.reasons.map(r=>'<tr><td>'+esc(r.client_id)+'</td><td>'+why(r.last_reason)+'</td><td class="num">'+r.n+'</td><td>'+hhmm(r.next)+'</td></tr>').join('');
