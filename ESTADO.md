@@ -187,3 +187,14 @@
 - Panel: ficha del trabajo al pulsar un paso en espera y filtros de decisiones (cliente, solo aplazamientos), comprobados en el navegador; nueva prueba que valida la sintaxis del JavaScript del panel y del informe con `node --check` (detectó en la práctica un salto de línea mal escapado antes de confirmar).
 - Seguridad: el arranque registra un aviso y el panel muestra una alerta si siguen en uso los tokens de ejemplo de `compose.yaml` (comprobado en el registro de la API). Suite completa con servicio y datos privados → **146 passed**.
 - Radar, rama `rubato-adapter` (`ea982a4`): las llamadas Codex también pasan por Rubato (era una limitación conocida de F6). Suite completa del radar → **521 passed, 3 skipped**.
+
+### Activación de la fase shadow del radar (2026-11-23, 23:10)
+- Estado: activa. **Pendiente de evidencia**: las primeras líneas de `data/integrations/rubato-shadow.jsonl`, que aparecerán con la siguiente llamada real del radar (la cola estaba vacía y no se lanzaron análisis para no gastar cuota de Gemini), y al menos 3 jornadas antes de valorar `enforce`.
+- Aprobado por Andrés («Sí, tras el reinicio»); ejecutado tras comprobar el reinicio de la cuota semanal (2 %).
+- swiss-job-radar: `main` avanzado en rápido a `ea982a4` (rama `rubato-adapter`, sin commit de fusión); los ficheros sin seguimiento ajenos (`.claude/`, `docs/research/…`, `scripts/analyze-portfolio-market.py`) quedan intactos. Suite → **524 passed**.
+- Rubato: `docker compose up -d --build` en modo normal (sin `RUBATO_TEST_CLOCK`), con tokens propios en `.env` (ignorado por Git). `/readyz` → esquema `0003_client_mode.sql`; sin aviso de tokens de ejemplo; el token de ejemplo responde 401 y `reset` responde 403. Recursos cargados desde `examples/profiles/radar-declared-2026-11-09.json` (14 recursos); política por defecto `radar@1`.
+- Radar: `RADAR_RUBATO_MODE=auto`, `RUBATO_URL` y `RUBATO_TOKEN` añadidos a su `.env` (ignorado por Git). Sin tareas en curso ni llamadas reservadas, se terminó el proceso `radar.web serve` y el supervisor lo relanzó (23:13:11, salud 200); el supervisor avisa por Discord de cada reinicio.
+- Modo: `PUT /v1/admin/clients/radar/mode {"mode":"shadow"}`; el adaptador del radar, con su propia configuración, devuelve `shadow`.
+- Comprobar: `rubato status --token <admin>` o el panel (`http://127.0.0.1:8000/panel`, tarjeta «Fase shadow»); tras 3 jornadas, `rubato shadow-report C:\Users\andre\Projects\swiss-job-radar\data\integrations\rubato-shadow.jsonl`.
+- Volver a `off`: en el panel, cliente `radar` → `off` (el radar lo aplica en 30 s). Para retirar la integración del todo, quitar las tres líneas `RUBATO_*` / `RADAR_RUBATO_MODE` del `.env` del radar y reiniciar su servidor desde el icono de la bandeja.
+- Requisito: Docker Desktop debe estar abierto para que Rubato responda. Si no responde, el radar sigue funcionando igual: mantiene el último modo conocido y en `shadow` nunca se bloquea.
