@@ -14,8 +14,8 @@ Windows 11 Pro 10.0.26300, Python 3.13.1, Docker Desktop 29.1.2, PostgreSQL 17-a
 | Qué | Cómo | Resultado |
 |---|---|---|
 | Simulador, entorno de tercero | rueda instalada en un venv limpio fuera del repositorio; `init-demo`, `simulate`, `compare`, `explain` | correcto; explica el aplazamiento de la candidatura |
-| Suite sin servicio | `pytest -q` | ver `ESTADO.md` (F8) |
-| Servicio desde clon limpio | `docker compose -p rubato-clean up --build` + `pytest -m postgres` + `demo-service` | ver `ESTADO.md` (F8) |
+| Suite sin servicio | `pytest -q` | ver `docs/desarrollo/ESTADO.md` (F8) |
+| Servicio desde clon limpio | `docker compose -p rubato-clean up --build` + `pytest -m postgres` + `demo-service` | ver `docs/desarrollo/ESTADO.md` (F8) |
 | Concurrencia | 20 `claims` concurrentes sobre la última petición | 1 permiso |
 | Caídas | antes y después de `start`, reinicio de API y planificador | estados `expired` / `unknown` recuperables |
 | Restauración | `restore_drill.py` | trazabilidad y decisiones conservadas |

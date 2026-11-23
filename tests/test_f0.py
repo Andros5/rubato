@@ -1,4 +1,4 @@
-"""F0: the five-turn acceptance case, solved by hand in PLAN_RUBATO.md section F0."""
+"""F0: the five-turn acceptance case, solved by hand in docs/desarrollo/PLAN_RUBATO.md section F0."""
 
 from rubato.model import Reason
 from rubato.scenarios import F0_HORIZON, f0_jobs, f0_policies, f0_resources

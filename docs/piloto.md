@@ -16,7 +16,7 @@
 al explicar la decisión (sí/no y en qué se equivocó); conceptos que faltaron o
 confundieron; errores del cargador que no entendió.
 
-**Registro.** Añadir el resultado a `ESTADO.md` (F8) sin datos personales del piloto.
+**Registro.** Añadir el resultado a `docs/desarrollo/ESTADO.md` (F8) sin datos personales del piloto.
 
 **Estado.** No celebrado: requiere una persona externa. El paquete reproducible está
 listo para la sesión.

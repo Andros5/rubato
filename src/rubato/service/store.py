@@ -1163,7 +1163,9 @@ def overview(conn, decisions_limit: int = 60) -> dict:
     specs, cap = _snapshot(conn, t)
     resources = []
     for s in specs:
-        unknown = sum(e.amount for e in cap.ledger.entries[s.id] if e.state == "unknown")
+        unknown = sum(
+            e.amount for e in cap.ledger._live(s.id, t) if e.state == "unknown"
+        )  # same window as "used"
         nxt = None
         if s.window == "calendar":
             nxt = s.next_reset(t)
