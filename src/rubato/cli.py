@@ -69,26 +69,32 @@ def cmd_compare(a: argparse.Namespace) -> int:
 
 
 def cmd_explain(a: argparse.Namespace) -> int:
+    from .explain import fmt_t
     from .runs import read_run
 
     data = read_run(a.run)
+    unit = data["manifest"]["trace"].get("time_unit", "s")
     label = a.policy or next(iter(data["runs"]))
     run = data["runs"][label]
     job = next((j for j in run["jobs"] if j["job"] == a.job), None)
     if job is None:
         print(f"job {a.job!r} not in run {label}", file=sys.stderr)
         return 2
+    dl = f", deadline {fmt_t(job['deadline'], unit)}" if job["deadline"] is not None else ""
     print(
-        f"{label}: {job['job']} ({job['client']}/{job['class']}) arrival {job['arrival']} "
-        f"[{job['arrival_provenance']}] deadline {job['deadline']}"
+        f"{label}: {job['job']} ({job['client']}/{job['class']}) arrived {fmt_t(job['arrival'], unit)} "
+        f"[{job['arrival_provenance']}]{dl}"
     )
     for d in run["decisions"]:
         if d["job"] == a.job:
-            nxt = f" reconsider {d['next_t']}" if d["action"] == "defer" else ""
+            nxt = f"; reconsider {fmt_t(d['next_t'], unit)}" if d["action"] == "defer" else ""
+            detail = f" {d['detail']}" if d["detail"] else ""
             print(
-                f"  t={d['t']} {d['step']}#{d['attempt']} {d['action'].upper()} [{d['reason']}] {d['detail']}{nxt}"
+                f"  {fmt_t(d['t'], unit)} {d['step']}#{d['attempt']} {d['action'].upper()} [{d['reason']}]{detail}{nxt}"
             )
-    print(f"  result: {job['status']}{' on time' if job['on_time'] else ''} finished {job['finished_at']}")
+    end = f" at {fmt_t(job['finished_at'], unit)}" if job["finished_at"] is not None else ""
+    state = job["status"] + (" on time" if job["on_time"] else (" late" if job["status"] == "done" else ""))
+    print(f"  result: {state}{end}")
     return 0
 
 
@@ -106,7 +112,10 @@ def cmd_evaluate(a: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
+
     p = argparse.ArgumentParser(prog="rubato", description="Shared-budget scheduler for AI workloads")
+    p.add_argument("--version", action="version", version=f"rubato {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("import-radar", help="read-only import of Swiss Job Radar history (private output)")
@@ -152,10 +161,26 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", default="private/eval")
     s.set_defaults(fn=cmd_evaluate)
 
+    s = sub.add_parser("init-demo", help="copy the synthetic example files into DIR/examples")
+    s.add_argument("dir", nargs="?", default=".")
+    s.set_defaults(fn=cmd_init_demo)
+
     s = sub.add_parser("demo-service", help="two clients share one quota on a running service (synthetic)")
     s.add_argument("rest", nargs=argparse.REMAINDER)
     s.set_defaults(fn=cmd_demo_service)
     return p
+
+
+def cmd_init_demo(a: argparse.Namespace) -> int:
+    """Copy the packaged synthetic example (trace, scenarios, frozen policies) into DIR/examples."""
+    from importlib import resources as ires
+
+    dest = Path(a.dir) / "examples"
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in ("demo.jsonl", "scenarios.json", "policies.json"):
+        (dest / name).write_bytes(ires.files("rubato.data").joinpath(name).read_bytes())
+    print(f"wrote {dest} (synthetic demo trace, scenarios and frozen policies)")
+    return 0
 
 
 def cmd_demo_service(a: argparse.Namespace) -> int:

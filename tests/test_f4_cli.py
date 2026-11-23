@@ -68,7 +68,7 @@ def test_simulate_compare_and_explain_end_to_end(tmp_path, capsys):
         == 0
     )
     out = capsys.readouterr().out
-    assert "DEFER [capacity_exhausted] rpd: needs 1, 0 available" in out
+    assert "DEFER [capacity_exhausted] rpd: needs 1, 0 available; reconsider 08:00:00 UTC" in out
 
 
 def test_same_inputs_same_outputs(tmp_path):
@@ -107,3 +107,9 @@ def test_evaluation_protocol_chooses_on_tuning_and_judges_on_test(tmp_path):
     v = r["verdict"]
     assert v["default_policy"] == (r["chosen"] if v["candidate_wins"] else "radar")
     assert all(d["urgent_received"] == 1 for d in r["blocks"]["test"]["runs"]["radar"]["per_day"].values())
+
+
+def test_packaged_example_matches_the_repository_copy(tmp_path):
+    assert main(["init-demo", str(tmp_path)]) == 0
+    for name in ("demo.jsonl", "scenarios.json", "policies.json"):
+        assert (tmp_path / "examples" / name).read_bytes() == (EX / name).read_bytes()
