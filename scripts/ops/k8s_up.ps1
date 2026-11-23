@@ -12,11 +12,11 @@ if (-not ((kind get clusters) -contains 'rubato')) {
     Invoke-Step kind @('create', 'cluster', '--name', 'rubato', '--config', 'deploy/kind/kind-config.yaml')
 }
 Invoke-Step kubectl @('config', 'use-context', 'kind-rubato')
-Invoke-Step docker @('build', '-q', '-t', 'rubato:1.1.0', '.')
+Invoke-Step docker @('build', '-q', '-t', 'rubato:1.1.1', '.')
 # 'kind load docker-image' fails with Docker's containerd image store (multi-platform digests);
 # a single-platform archive works. postgres is pulled by the node itself.
-$archive = Join-Path $env:TEMP 'rubato-1.1.0.tar'
-Invoke-Step docker @('save', '--platform', 'linux/amd64', '-o', $archive, 'rubato:1.1.0')
+$archive = Join-Path $env:TEMP 'rubato-1.1.1.tar'
+Invoke-Step docker @('save', '--platform', 'linux/amd64', '-o', $archive, 'rubato:1.1.1')
 Invoke-Step kind @('load', 'image-archive', $archive, '--name', 'rubato')
 Remove-Item $archive
 if (-not (Test-Path deploy/k8s/secrets.env)) {

@@ -6,6 +6,6 @@ authors:
   - name: Andros5
 repository-code: https://github.com/Andros5/rubato
 license: MIT
-version: 1.1.0
+version: 1.1.1
 date-released: 2026-11-24
 keywords: [scheduling, rate limits, LLM, quota, simulation, admission control]
