@@ -1202,7 +1202,13 @@ def overview(conn, decisions_limit: int = 60) -> dict:
     totals = conn.execute(
         "SELECT state, count(*) AS n FROM jobs WHERE created_at > %s GROUP BY 1", (t - 86400,)
     ).fetchall()
+    shadow = conn.execute(
+        "SELECT client_id, payload->>'action' AS action, payload->>'reason' AS reason, count(*) AS n FROM events "
+        "WHERE kind='shadow_decision' AND t > %s GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC",
+        (t - 86400,),
+    ).fetchall()
     return {
+        "shadow_24h": shadow,
         "t": t,
         "resources": resources,
         "clients": clients,

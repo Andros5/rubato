@@ -38,6 +38,11 @@ def test_overview_feeds_the_panel():
     assert any(r["last_reason"] == "capacity_exhausted" for r in o["reasons"])
     assert [w["job_id"] for w in o["waiting"]] == ["radar:a"]
     assert o["policy"]["label"].startswith("radar@") and o["decisions"]
+    with client("radar") as r:  # a shadow question is counted in the panel
+        ok(r.post("/v1/claims", json={"job": "a", "step": "s", "shadow": True}))
+    with client("admin") as a:
+        sh = ok(a.get("/v1/admin/overview"))["shadow_24h"]
+    assert sh == [{"client_id": "radar", "action": "defer", "reason": "capacity_exhausted", "n": 1}]
     page = httpx.get(f"{API}/panel")
     assert page.status_code == 200 and "Rubato · panel" in page.text and "const esc=" in page.text
     assert "https://" not in page.text  # self-contained

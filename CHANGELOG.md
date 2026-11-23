@@ -5,7 +5,8 @@
 - Live panel at `/panel`: quota per resource (background, urgent, uncertain), queue and
   waiting reasons per client, latest decisions, uncertain attempts with one-click
   reconciliation, active policy editor, alerts (uncertain attempts, provider pauses,
-  quota below 10 %). Self-contained, escaped, works on a phone.
+  quota below 10 %), live shadow-phase card (agreement and divergences of the last 24 h
+  from the service events). Self-contained, escaped, works on a phone.
 - Client modes controlled from the service: migration `0003_client_mode.sql`,
   `GET /v1/mode`, `PUT /v1/admin/clients/{id}/mode`; SDK `Gate(mode="auto")` and the
   radar and CitaLab adapters (`auto`) follow the switch within 30 s and keep the last
