@@ -18,7 +18,7 @@ services:
   api:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     build: .
-    image: rubato:${RUBATO_VERSION:-1.1.0}
+    image: rubato:${RUBATO_VERSION:-1.1.1}
     environment: &env
       RUBATO_DSN: postgresql://rubato:rubato-local-only@db:5432/rubato
       RUBATO_CLIENTS: ${RUBATO_CLIENTS:-admin:admin-local-token:admin:0,radar:radar-local-token:client:1,citalab:citalab-local-token:client:1}
@@ -37,7 +37,7 @@ services:
   api2:  # second replica for the failover drill: docker compose --profile ha up -d
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     profiles: ["ha"]
-    image: rubato:${RUBATO_VERSION:-1.1.0}
+    image: rubato:${RUBATO_VERSION:-1.1.1}
     environment: *env
     command: ["uvicorn", "rubato.service.app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["127.0.0.1:${RUBATO_API2_PORT:-8001}:8000"]
@@ -45,14 +45,14 @@ services:
       api: {condition: service_healthy}
   scheduler:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
-    image: rubato:${RUBATO_VERSION:-1.1.0}
+    image: rubato:${RUBATO_VERSION:-1.1.1}
     environment: *env
     command: ["python", "-m", "rubato.service.scheduler"]
     depends_on:
       api: {condition: service_healthy}
   provider:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
-    image: rubato:${RUBATO_VERSION:-1.1.0}
+    image: rubato:${RUBATO_VERSION:-1.1.1}
     environment:
       RUBATO_PROVIDER_DB: /data/receipts.sqlite
     command: ["uvicorn", "rubato.service.provider_sim:app", "--host", "0.0.0.0", "--port", "8100"]

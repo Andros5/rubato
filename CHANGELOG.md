@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1 — 2026-11-24
+
+- Public repository: README with architecture, screenshots and results; CONTRIBUTING,
+  SECURITY, CITATION, issue and pull-request templates, grouped Dependabot updates.
+- CI on Python 3.11, 3.12 and 3.13 (Linux) and 3.13 (Windows); `pip install -e .[dev]`
+  now installs the service dependencies, so the whole suite runs in a clean environment.
+- Compose services restart with Docker (`restart: unless-stopped`).
+- Panel: accepts the admin token from the URL fragment; uncertain amounts are counted in
+  the same window as the used amount.
+- Development notes moved to `docs/desarrollo/`.
+
 ## 1.1.0 — 2026-11-23 (local release, not published)
 
 - Live panel at `/panel`: quota per resource (background, urgent, uncertain), queue and
