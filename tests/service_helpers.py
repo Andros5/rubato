@@ -34,7 +34,9 @@ def ok(r: httpx.Response, status: int | tuple = (200, 201)) -> dict:
 
 def reset(resources: list[dict], policy: dict | None = None) -> None:
     with client("admin") as a:
-        ok(a.post("/v1/admin/reset"))
+        r = a.post("/v1/admin/reset")
+        assert r.status_code != 403, "start the stack with RUBATO_TEST_CLOCK=1 to run the service tests"
+        ok(r)
         ok(a.put("/v1/admin/resources", json=resources))
         if policy:
             ok(a.put("/v1/admin/policy", json=policy))

@@ -19,7 +19,7 @@ simulator: no keys, no cost.
 
 ```powershell
 py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install rubato-1.0.0-py3-none-any.whl   # or: pip install -e ".[dev]" from a clone
+.\.venv\Scripts\python.exe -m pip install rubato-1.0.1-py3-none-any.whl   # or: pip install -e ".[dev]" from a clone
 .\.venv\Scripts\rubato.exe init-demo .            # copies examples/ (synthetic trace, scenarios, frozen policies)
 .\.venv\Scripts\rubato.exe simulate --trace examples/demo.jsonl --scenario urgencia-tardia --policies radar,reserva --out runs/demo
 .\.venv\Scripts\rubato.exe compare --run runs/demo --report informe.html
@@ -50,10 +50,14 @@ reserva: match-05-017 (radar/match) arrived 16:28:44 UTC [synthetic]
 ## Run the service
 
 ```powershell
+$env:RUBATO_TEST_CLOCK = '1'          # test/demo mode: enables the reset and clock endpoints
 docker compose up --build -d          # PostgreSQL, API, planner, simulated provider
 .\.venv\Scripts\python.exe -m pip install -e ".[service]"
 .\.venv\Scripts\rubato.exe demo-service   # two clients share one quota; an urgent job arrives late
 ```
+
+Without `RUBATO_TEST_CLOCK=1` the stack starts in normal mode (no reset or clock
+endpoints): that is the mode an application in `shadow` or `enforce` should talk to.
 
 Clients register jobs, ask for a permit (`POST /v1/claims`), confirm the start before
 calling the provider and settle the real usage afterwards. Each client can run in
@@ -86,7 +90,7 @@ long retries, not quota), so the reference stays the default. Details and limits
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q                       # simulator, no network
-$env:RUBATO_TEST_API = 'http://127.0.0.1:8000'               # with docker compose up
+$env:RUBATO_TEST_API = 'http://127.0.0.1:8000'               # stack started with RUBATO_TEST_CLOCK=1
 .\.venv\Scripts\python.exe -m pytest -q -m postgres          # service on real PostgreSQL
 ```
 

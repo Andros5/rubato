@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from .core import Capacity, Demand, decidir
-from .model import Action, Decision, Job, Outcome, ReadyItem, Reason, Status, tokens_total
+from .model import Action, Decision, Job, Outcome, ReadyItem, Reason, Status, find_cycle, tokens_total
 from .resources import Ledger, ResourceSpec
 
 FINISH, PAUSE_END, CANCEL, CLIENT, ARRIVAL, WAKEUP = range(6)
@@ -117,6 +117,10 @@ class Simulator:
         ids = [j.id for j in jobs]
         if len(set(ids)) != len(ids):
             raise ValueError("duplicate job ids")
+        for j in jobs:
+            cycle = find_cycle({s.id: s.depends_on for s in j.steps})
+            if cycle:
+                raise ValueError(f"job {j.id}: dependency cycle {' -> '.join(cycle)}")
         self.jobs = {j.id: j for j in jobs}
         self.seq = {j.id: i for i, j in enumerate(jobs)}
         self.resources = list(resources)
@@ -329,9 +333,8 @@ class Simulator:
             # --- decision round ------------------------------------------
             ready: list[ReadyItem] = []
             demand: list[Demand] = []
-            for jid in sorted(known, key=lambda x: self.seq[x]):
-                if job_status.get(jid) != "active":
-                    continue
+            known = {x for x in known if job_status.get(x) == "active"}  # finished jobs leave the round
+            for jid in sorted(known, key=self.seq.__getitem__):
                 job = self.jobs[jid]
                 rem_need, rem_dur = remaining(job)
                 if rem_need:
