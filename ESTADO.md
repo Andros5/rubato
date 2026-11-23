@@ -5,14 +5,14 @@
 | F0 · Repositorio y caso mínimo | Completa (CI Linux pendiente de evidencia) |
 | F1 · Trazas | Completa (jornadas prospectivas pendientes de evidencia) |
 | F2 · Simulador | Completa |
-| F3 · Políticas | Pendiente |
+| F3 · Políticas | Completa |
 | F4 · Evaluación y demo | Pendiente |
 | F5 · Servicio | Pendiente |
 | F6 · Integraciones | Pendiente |
 | F7 · Operación y Kubernetes | Pendiente |
 | F8 · Distribución | Pendiente |
 
-**Siguiente tarea.** F3: referencia Radar, optimizador por enumeración y CP-SAT, tres jornadas (reserva mejora / perjudica / da igual).
+**Siguiente tarea.** F4: escenarios versionados, CLI `simulate`/`compare`, informe HTML y evaluación por bloques de fechas.
 
 ## Evidencia por fase
 
@@ -55,3 +55,19 @@
 - Evidencia reproducible: `tests/test_f2_sim.py` — llegadas simultáneas (orden de traza, mismo resultado al repetir), medianoche en Europe/Zurich (aplazamiento `capacity_exhausted` con reconsideración exacta a las 00:00 locales; las llamadas que cruzan la medianoche cuentan en el día anterior), día de cambio de hora de 23 h, tokens insuficientes (`rate_limited`, disponible 2000, reconsideración t=60) y paso que nunca cabe (`never_fits` con acción sugerida), cancelación (paso en curso consume, paso futuro `cancelled`), dependencia fallida tras `max_attempts`, doble límite (rpm libera en 60, tpm en 90; motivo vinculante tpm y arranque en 90), sin bucle cuando nada es elegible, reinicio de cliente, 429 con pausa hasta t=31, consumo real superior/inferior a la estimación, presupuesto monetario entero, misma semilla → misma secuencia de decisiones y mismas métricas.
 - Supuesto o limitación: el aplazamiento por pausa de cliente no tiene hora de reconsideración (depende de un evento externo). Una pausa por 429 se aplica al modelo completo.
 - Próxima tarea concreta: F3.
+
+### F3 · Políticas y explicación
+- Estado: completa.
+- Fecha: 2026-11-23.
+- Cambio entregado: `RadarPolicy` (prioridad desc., elegibilidad) con diferencias frente a `Workspace.claim` en `docs/referencia-radar.md`; `ReservePolicy` con reserva por recurso, liberación absoluta o por desfase en la ventana, antigüedad (`aging_limit`), política de plazos imposibles (`run`/`background`/`drop`) y protección de la demanda urgente conocida; relleno (`backfill`) con el trabajo adelantado en el detalle; `optimize.py` (enumeración exhaustiva y CP-SAT, extra `rubato[opt]`, OR-Tools 9.15); `explain.py` (`explain_job`, `what_if` que vuelve a simular, `winners` por objetivo sin media ponderada).
+- Pruebas ejecutadas: `.\.venv\Scripts\python.exe -m pytest -q` → `69 passed, 1 skipped`; `ruff check` limpio.
+- Evidencia reproducible (`tests/test_f3_policies.py`):
+  - Día en que reservar mejora: urgencias a tiempo 1 (reserva) frente a 0 (llegada).
+  - Día en que perjudica: sin urgencia, fondo a tiempo 3 (llegada) frente a 1 (reserva); `winners` declara ganadora a `fifo@1` en fondo y muestra el empate en urgencias; `what_if` lista `analisis-2` y `analisis-3` como perjudicados.
+  - Día en que da igual: cuota 10, mismos resultados.
+  - Óptimo con información perfecta: F0 con urgencia (1 urgente, 1 fondo, 2 terminados) y sin urgencia (0, 3, 3), igual a la resolución a mano; ninguna política en línea lo supera. CP-SAT = enumeración en 25 instancias aleatorias pequeñas (semillas 0–24, con ventanas móviles, cuota total, concurrencia, dependencias e intentos inválidos).
+  - Antigüedad: con `aging_limit=30` los tres trabajos de fondo terminan (0, 30, 30); sin ella, uno.
+  - Plazo imposible: `drop` cierra con `deadline_impossible` y el instante más temprano de fin (10 > 5); `background` lo ejecuta tarde.
+  - Relleno: `small` adelanta a `big` con motivo `backfill`; la explicación de `big` dice `DEFERRED [rate_limited] ... reconsider t=60`.
+- Supuesto o limitación: el optimizador trabaja en tiempo discreto, toma el primer intento de la traza y no admite ventanas de calendario con zona horaria; es una cota bajo las hipótesis del escenario, no una política.
+- Próxima tarea concreta: F4.
