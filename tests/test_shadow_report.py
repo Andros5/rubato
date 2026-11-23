@@ -44,3 +44,8 @@ def test_counts_agreement_divergence_latency_and_readiness(tmp_path, capsys):
 def test_not_ready_when_rubato_was_unreachable_or_too_few_days(tmp_path):
     r = shadow_report(write(tmp_path, [row(1_795_651_200, "match", None, None, 5000)]))
     assert r["rubato_unavailable"] == 1 and r["ready_for_enforce"] is False and r["agreement_ratio"] is None
+
+
+def test_status_explains_an_unreachable_service(capsys):
+    assert main(["status", "--api", "http://127.0.0.1:9"]) == 2
+    assert "not reachable" in capsys.readouterr().out

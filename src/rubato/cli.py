@@ -119,6 +119,41 @@ def cmd_shadow_report(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(a: argparse.Namespace) -> int:
+    """One-screen summary of a running service (the panel, in the terminal)."""
+    import os
+    from datetime import datetime
+
+    import httpx
+
+    token = a.token or os.environ.get("RUBATO_ADMIN_TOKEN", "admin-local-token")
+    try:
+        r = httpx.get(f"{a.api}/v1/admin/overview", headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    except httpx.HTTPError as e:
+        print(f"Rubato is not reachable at {a.api}: {e}. Is Docker running? (docker compose up -d)")
+        return 2
+    if r.status_code != 200:
+        print(f"{r.status_code}: {r.text[:200]}")
+        return 2
+    d = r.json()
+
+    def hhmm(t):
+        return datetime.fromtimestamp(t).strftime("%H:%M") if t else "-"
+
+    print(f"Rubato at {a.api} · policy {d['policy']['label']} · {hhmm(d['t'])}")
+    print("Clients: " + ", ".join(f"{c['id']}={c['mode']}" for c in d["clients"]))
+    for q in d["resources"]:
+        tail = f", resets {hhmm(q['resets_at'])}" if q["resets_at"] else ""
+        print(f"  {q['id']:<18} {q['used']:>7}/{q['capacity']:<7} left {q['available']}{tail}")
+    for r_ in d["reasons"]:
+        print(f"  waiting {r_['client_id']}: {r_['n']} × {r_['last_reason']} (next {hhmm(r_['next'])})")
+    if d["unknown_attempts"]:
+        print(f"  ! {len(d['unknown_attempts'])} uncertain attempt(s) to reconcile in {a.api}/panel")
+    for p in d["pauses"]:
+        print(f"  ! provider pause {p['scope_kind']} {p['scope_value']} until {hhmm(p['until'])}")
+    return 1 if d["unknown_attempts"] else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from . import __version__
 
@@ -168,6 +203,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--deadline-minutes", type=int, default=60)
     s.add_argument("--out", default="private/eval")
     s.set_defaults(fn=cmd_evaluate)
+
+    s = sub.add_parser("status", help="summary of a running service: modes, quota, waiting, alerts")
+    s.add_argument("--api", default="http://127.0.0.1:8000")
+    s.add_argument("--token", help="admin token (default: RUBATO_ADMIN_TOKEN or the local Compose token)")
+    s.set_defaults(fn=cmd_status)
 
     s = sub.add_parser("shadow-report", help="agreement, divergences and added latency of a shadow phase")
     s.add_argument("file", help="JSONL written by an adapter in shadow mode")

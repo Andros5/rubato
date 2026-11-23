@@ -10,6 +10,8 @@
   `GET /v1/mode`, `PUT /v1/admin/clients/{id}/mode`; SDK `Gate(mode="auto")` and the
   radar and CitaLab adapters (`auto`) follow the switch within 30 s and keep the last
   known mode if Rubato is unreachable.
+- `rubato status` (the panel in the terminal) and `scripts/ops/arranque_windows.ps1` (optional
+  start at logon; not registered automatically). CI also checks formatting.
 - `GET /v1/admin/overview` and `rubato shadow-report` (agreement, divergences, added
   latency, readiness for enforce).
 - Fix: a focused claim (adapter asking for one step) released the speculative permits the
