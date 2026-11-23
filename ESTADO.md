@@ -10,9 +10,11 @@
 | F5 · Servicio | Completa |
 | F6 · Integraciones | En curso: adaptadores y demo completos; jornadas `shadow` y activación real pendientes de evidencia |
 | F7 · Operación y Kubernetes | En curso: Compose completo; clúster local pendiente (falta `kind` o Kubernetes de Docker Desktop) |
-| F8 · Distribución | Pendiente |
+| F8 · Distribución | v1.0.0 local preparada; piloto externo pendiente de evidencia |
 
-**Siguiente tarea.** F8: paquete y notas de versión, README en inglés, guía en español, referencia CLI/API, ADR y demo. En paralelo F7-k8s cuando haya clúster local.
+**Siguiente tarea.** Criterios abiertos, por orden: (1) F7 en clúster local: instalar `kind` (o activar Kubernetes en Docker Desktop) y ejecutar `scripts/ops/k8s_up.ps1`, la suite `-m postgres` y `ha_drill.py` contra `127.0.0.1:18000`; (2) F6: `RADAR_RUBATO_MODE=shadow` en el radar durante varias jornadas con el servicio levantado y revisar `data/integrations/rubato-shadow.jsonl`; (3) F4/F1: con esas jornadas, ampliar el bloque de prueba con llegadas `observed`; (4) F8: piloto externo (`docs/piloto.md`); (5) confirmar los umbrales de `config/piloto.json`; (6) CI en Linux al crear el remoto.
+
+**Pendiente de evidencia (no sustituible por datos sintéticos):** jornadas `shadow` reales, activación `enforce` progresiva, jornada real con ambos clientes compitiendo, clúster Kubernetes local, CI Linux, piloto externo, acuerdo de umbrales.
 
 ## Evidencia por fase
 
@@ -124,3 +126,16 @@
 - Entorno: Windows 11 Pro 10.0.26300, Docker Desktop 29.1.2 (8 CPU, 3,7 GiB), PostgreSQL 17-alpine, Python 3.13.1.
 - Supuesto o limitación: números medidos en un portátil con Docker Desktop, no extrapolables a producción. Todas las transacciones mutantes se serializan (D10).
 - Próxima tarea concreta: con `kind` disponible, `scripts/ops/k8s_up.ps1`, después `RUBATO_TEST_API=http://127.0.0.1:18000 RUBATO_TEST_PROVIDER=http://127.0.0.1:18100 RUBATO_TEST_*_TOKEN=<de secrets.env> pytest -q -m postgres` y `ha_drill.py --a http://127.0.0.1:18000 --b http://127.0.0.1:18000 --kill "kubectl:rubato/app=api#0,kubectl:rubato/app=api#0" --provider http://127.0.0.1:18100`.
+
+### F8 · Distribución, documentación y demo de la v1
+- Estado: versión local `v1.0.0` preparada. **Pendiente de evidencia**: piloto con un mantenedor externo (protocolo en `docs/piloto.md`); no publicada (publicar es una acción separada).
+- Fecha: 2026-11-23.
+- Cambio entregado: versión 1.0.0 (`pyproject.toml`, `rubato --version`), datos de ejemplo empaquetados y `rubato init-demo`, `explain` con horas legibles, `demo-service` en la CLI, `README.md` en inglés, `docs/guia.md`, `docs/referencia.md` (CLI y API), ADR `docs/adr/0001-0003` (topes estrictos frente a estimaciones, política en línea frente a óptimo, recuperación de intentos inciertos; incluye cuándo la reserva rindió peor), `docs/demo.md` y `scripts/demo.ps1` (demo narrada de ~2 min), `docs/piloto.md`, `CHANGELOG.md`, `docs/release-v1.0.0.md` (probado en local / observado en los proyectos de Andrés / pendiente), `LICENSE` (MIT, «Rubato contributors»).
+- Pruebas ejecutadas:
+  - `python -m build` → `rubato-1.0.0-py3-none-any.whl` (SHA-256 `cfcdad30…ea30`) y `rubato-1.0.0.tar.gz` (`6978ec96…9176`); sin `private/`, `runs/`, bases ni secretos dentro.
+  - Vía del simulador para un tercero: venv limpio fuera del repositorio, `pip install rubato-1.0.0-py3-none-any.whl`, `rubato init-demo .`, `simulate … urgencia-tardia`, `compare`, `explain --policy radar --job candidatura-urgente` → «17:15:00 UTC cv#1 DEFER [capacity_exhausted] rpd: needs 1, 0 available; reconsider 08:00:00 UTC».
+  - Vía del servicio desde un clon limpio: `docker compose -p rubato-clean up --build -d` (21,6 s) → `/readyz` con esquema 0002; `pytest -q` con el servicio → `91 passed, 2 skipped` (privada y reinicio con control de Compose); `rubato demo-service` → candidatura terminada con `reserva`, 2 peticiones cedidas por el fondo, 1 episodio de CitaLab pendiente; con `radar` la candidatura no pasa; `off` → 3 llamadas, 0 decisiones nuevas.
+  - Repositorio: `pytest -q` → `75 passed, 18 skipped` sin servicio; `ruff check` limpio.
+- Evidencia reproducible: `docs/release-v1.0.0.md`, `docs/demo.md`, `scripts/demo.ps1`.
+- Supuesto o limitación: imagen local `rubato:1.0.0` sin registro; la CI Linux no se ha ejecutado.
+- Próxima tarea concreta: la lista «Siguiente tarea» del principio de este fichero.

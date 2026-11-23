@@ -10,7 +10,6 @@ Everything here is synthetic and the provider is the local simulator: no keys, n
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 
 import httpx
@@ -206,19 +205,3 @@ def run_demo(api: str, provider: str, tokens: dict, tag: str) -> dict:
         },
         "off": off,
     }
-
-
-def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI wrapper
-    import argparse
-    import time
-
-    p = argparse.ArgumentParser(prog="rubato demo-service")
-    p.add_argument("--api", default="http://127.0.0.1:8000")
-    p.add_argument("--provider", default="http://127.0.0.1:8100")
-    p.add_argument("--admin-token", default="admin-local-token")
-    p.add_argument("--radar-token", default="radar-local-token")
-    p.add_argument("--citalab-token", default="citalab-local-token")
-    a = p.parse_args(argv)
-    tokens = {"admin": a.admin_token, "radar": a.radar_token, "citalab": a.citalab_token}
-    print(json.dumps(run_demo(a.api, a.provider, tokens, f"demo{int(time.time())}"), indent=2))
-    return 0
