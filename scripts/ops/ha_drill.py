@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import statistics
 import subprocess
@@ -23,7 +24,9 @@ import time
 
 import httpx
 
-TOK = {"admin": "admin-local-token", "radar": "radar-local-token", "citalab": "citalab-local-token"}
+TOK = {  # Compose defaults; override for other environments (e.g. the kind cluster's secrets.env)
+    who: os.environ.get(f"RUBATO_TEST_{who.upper()}_TOKEN", f"{who}-local-token") for who in ("admin", "radar", "citalab")
+}
 
 
 def hdr(who):
