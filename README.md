@@ -64,6 +64,8 @@ resource, queue and waiting reasons per client, latest decisions, uncertain atte
 one-click reconciliation, the active policy, and the `off` / `shadow` / `enforce` switch of
 each client. Applications started with mode `auto` follow that switch within 30 s.
 `rubato shadow-report <file>` summarises a shadow phase (agreement, divergences, added latency).
+In a terminal: `rubato status` (modes, quota, waiting, alerts) and `rubato why radar:<id>`
+(every decision about a live job). Optional start at logon: `scripts/ops/arranque_windows.ps1`.
 
 Clients register jobs, ask for a permit (`POST /v1/claims`), confirm the start before
 calling the provider and settle the real usage afterwards. Each client can run in
