@@ -1,0 +1,24 @@
+# Local test cluster (kind). Secrets come from secrets.env (git-ignored):
+#   copy deploy/k8s/secrets.env.example to deploy/k8s/secrets.env and change the values.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: rubato
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - api.yaml
+  - scheduler.yaml
+  - provider.yaml
+configMapGenerator:
+  - name: rubato-config
+    literals:
+      - RUBATO_GRANT_TTL=5
+      - RUBATO_ATTEMPT_TIMEOUT=600
+      - RUBATO_TEST_CLOCK=1        # test cluster only: enables reset/clock for the behaviour suite
+      - RUBATO_LOG_LEVEL=INFO
+secretGenerator:
+  - name: rubato-secrets
+    envs: [secrets.env]
+images:
+  - name: rubato
+    newTag: 1.0.0

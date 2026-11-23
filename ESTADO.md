@@ -9,10 +9,10 @@
 | F4 · Evaluación y demo | Completa (umbrales del piloto pendientes de acuerdo; jornadas prospectivas pendientes) |
 | F5 · Servicio | Completa |
 | F6 · Integraciones | En curso: adaptadores y demo completos; jornadas `shadow` y activación real pendientes de evidencia |
-| F7 · Operación y Kubernetes | Pendiente |
+| F7 · Operación y Kubernetes | En curso: Compose completo; clúster local pendiente (falta `kind` o Kubernetes de Docker Desktop) |
 | F8 · Distribución | Pendiente |
 
-**Siguiente tarea.** F7: métricas y registros, restauración y migración, manifiestos de Kubernetes y ensayo con dos réplicas.
+**Siguiente tarea.** F8: paquete y notas de versión, README en inglés, guía en español, referencia CLI/API, ADR y demo. En paralelo F7-k8s cuando haya clúster local.
 
 ## Evidencia por fase
 
@@ -110,3 +110,17 @@
 - Evidencia reproducible: `docs/integraciones.md`. Demo sintética (cuota 24): `reserva` → candidatura urgente terminada, fondo 22/24, 1 episodio de CitaLab pendiente; `radar` → fondo 24/24, candidatura en `capacity_exhausted`; `off` → 3 llamadas por la vía habitual y 0 decisiones nuevas en Rubato.
 - Supuesto o limitación: la competencia entre clientes se demuestra con carga sintética y proveedor simulado; las llamadas Codex del radar no están coordinadas; en CitaLab cada intento de inferencia es un trabajo de un paso.
 - Próxima tarea concreta: F7. En paralelo, cuando Andrés lo apruebe: `RADAR_RUBATO_MODE=shadow` en su radar con el servicio de Compose levantado.
+
+### F7 · Operación, concurrencia y Kubernetes
+- Estado: en curso. Compose: completo. **Pendiente de evidencia**: la misma suite y el ensayo en un clúster local; `kind` no está instalado, `kubectl` no tiene contexto y el Kubernetes de Docker Desktop está desactivado. Instalar `kind` implica descargar un binario: queda a decisión de Andrés.
+- Fecha: 2026-11-23.
+- Cambio entregado: métricas Prometheus sin etiquetas por trabajo (`/metrics`), registros JSON con `X-Correlation-Id`, `/healthz` y `/readyz` con versión de esquema, migración `0002_meta_and_audit_idx.sql` (metadatos de planificación e índices de auditoría), réplica `api2` (perfil `ha`), `scripts/ops/ha_drill.py`, `scripts/ops/restore_drill.py`, `docs/operacion.md` (runbook: intento incierto, proveedor en pausa, trabajo bloqueado, reserva sin liquidar, desviación contable; diagnóstico y criterios para reanudar), manifiestos `deploy/k8s/` (namespace, PostgreSQL con volumen persistente, API 2 réplicas, planificador, proveedor simulado, ConfigMap, Secret generado desde `secrets.env` ignorado por Git, límites de recursos, sondas, usuario no root, sistema de ficheros de solo lectura), `deploy/kind/kind-config.yaml`, `scripts/ops/k8s_up.ps1`.
+- Pruebas ejecutadas:
+  - `RUBATO_TEST_API=http://127.0.0.1:8000 RUBATO_TEST_COMPOSE=1 RUBATO_TEST_DSN=postgresql://rubato:rubato-local-only@127.0.0.1:55432/rubato pytest -q` → `91 passed, 1 skipped` (la omitida es la prueba privada del radar).
+  - `tests/test_f7_ops.py`: migración desde 0001 con datos → 0002 aplicada, datos intactos, idempotente; una base actualizada sigue planificando trabajos antiguos; métricas sin IDs de trabajo; eco del ID de correlación.
+  - `python scripts/ops/restore_drill.py` → todas las comprobaciones `true`: volcado 0,61 s (28 kB), restauración 0,43 s en un PostgreSQL desechable; decisiones, saldo e intento `unknown` idénticos; trabajo terminado intacto; la API nueva concede un permiso y concilia el intento incierto.
+  - `RUBATO_GRANT_TTL=5 docker compose --profile ha up -d; python scripts/ops/ha_drill.py` → 2 réplicas, 2 consumidores, 80 trabajos; réplica B muerta durante una reserva (t=18,7 s) y réplica A durante una llamada (t=37,0 s); el paso interrumpido vuelve a atenderse a los 6,2 s (TTL 5 s); 0 permisos duplicados; 80 peticiones confirmadas = 80 recibos del proveedor (descuadre 0); 0 intentos inciertos; latencia de `claims` vista por el cliente p50 276 ms / p95 353 ms (conexión nueva por petición, conmutaciones y reenvío de puertos de Docker Desktop, ~44 ms por petición incluso en `/healthz`); en el servidor `claims` tarda ~8,5 ms según los registros.
+  - `kubectl kustomize deploy/k8s` → 11 objetos válidos.
+- Entorno: Windows 11 Pro 10.0.26300, Docker Desktop 29.1.2 (8 CPU, 3,7 GiB), PostgreSQL 17-alpine, Python 3.13.1.
+- Supuesto o limitación: números medidos en un portátil con Docker Desktop, no extrapolables a producción. Todas las transacciones mutantes se serializan (D10).
+- Próxima tarea concreta: con `kind` disponible, `scripts/ops/k8s_up.ps1`, después `RUBATO_TEST_API=http://127.0.0.1:18000 RUBATO_TEST_PROVIDER=http://127.0.0.1:18100 RUBATO_TEST_*_TOKEN=<de secrets.env> pytest -q -m postgres` y `ha_drill.py --a http://127.0.0.1:18000 --b http://127.0.0.1:18000 --kill "kubectl:rubato/app=api#0,kubectl:rubato/app=api#0" --provider http://127.0.0.1:18100`.

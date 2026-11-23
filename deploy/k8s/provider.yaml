@@ -1,0 +1,31 @@
+# Simulated provider with receipts (no keys, no cost). Test cluster only.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: provider, labels: {app: provider}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: provider}}
+  template:
+    metadata: {labels: {app: provider}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: provider
+          image: rubato
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "rubato.service.provider_sim:app", "--host", "0.0.0.0", "--port", "8100"]
+          env: [{name: RUBATO_PROVIDER_DB, value: /data/receipts.sqlite}]
+          ports: [{containerPort: 8100}]
+          volumeMounts: [{name: data, mountPath: /data}]
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 250m, memory: 192Mi}
+      volumes: [{name: data, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: provider}
+spec:
+  type: NodePort
+  selector: {app: provider}
+  ports: [{port: 8100, targetPort: 8100, nodePort: 30081}]

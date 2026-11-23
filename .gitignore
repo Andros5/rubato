@@ -25,3 +25,6 @@ private/
 runs/
 informe*.html
 !examples/**
+
+# Kubernetes secrets for the local test cluster
+deploy/k8s/secrets.env

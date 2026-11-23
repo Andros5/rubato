@@ -32,6 +32,14 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+  api2:  # second replica for the failover drill: docker compose --profile ha up -d
+    profiles: ["ha"]
+    image: rubato:${RUBATO_VERSION:-1.0.0}
+    environment: *env
+    command: ["uvicorn", "rubato.service.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:${RUBATO_API2_PORT:-8001}:8000"]
+    depends_on:
+      api: {condition: service_healthy}
   scheduler:
     image: rubato:${RUBATO_VERSION:-1.0.0}
     environment: *env
