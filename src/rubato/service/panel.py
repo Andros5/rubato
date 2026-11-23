@@ -60,7 +60,7 @@ const hhmm=t=>t?new Date(t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'
 const ago=(now,t)=>{if(!t)return'—';const s=now-t;return s<90?s+' s':s<5400?Math.round(s/60)+' min':(s/3600).toFixed(1)+' h'};
 const REASON={fifo_order:'orden de llegada',priority_order:'prioridad',urgent_first:'urgente primero',backfill:'adelanta a otro',deadline_reserve:'reservado para urgencias',capacity_exhausted:'cuota agotada',rate_limited:'límite por minuto',concurrency_limit:'sin hueco de ejecución',provider_pause:'pausa del proveedor',depends_on_step:'espera otro paso',dependency_failed:'falló un paso previo',never_fits:'nunca cabe',deadline_impossible:'plazo imposible',max_attempts:'intentos agotados',cancelled:'cancelado',client_unavailable:'cliente sin ejecutor'};
 const why=r=>esc(REASON[r]||r||'—');
-let token=sessionStorage.getItem('rubato-admin')||'';let timer=null;
+let token=sessionStorage.getItem('rubato-admin')||'';{const m=location.hash.match(/token=([^&]+)/);if(m){token=decodeURIComponent(m[1]);sessionStorage.setItem('rubato-admin',token);history.replaceState(null,'',location.pathname)}}let timer=null;
 async function api(method,path,body){const r=await fetch(path,{method,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
  const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.message||('HTTP '+r.status));return data}
 function show(logged){$('login').hidden=logged;$('app').hidden=!logged}
