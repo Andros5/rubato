@@ -20,7 +20,7 @@ log = logging.getLogger("rubato.scheduler")
 
 
 def main() -> None:
-    logging.basicConfig(level=os.environ.get("RUBATO_LOG_LEVEL", "INFO"), format="%(message)s")
+    logging.basicConfig(level=os.environ.get("RUBATO_LOG_LEVEL", "INFO"), format="%(message)s", force=True)
     interval = float(os.environ.get("RUBATO_SCHEDULER_INTERVAL", "2"))
     stop = {"flag": False}
     signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
@@ -28,7 +28,12 @@ def main() -> None:
         try:
             with db.connect() as conn:
                 db.migrate(conn)
+                last_maintenance = float("-inf")  # run once at start, then hourly
                 while not stop["flag"]:
+                    if time.monotonic() - last_maintenance > 3600:
+                        with conn.transaction():
+                            log.info(json.dumps({"msg": "maintenance", **store.maintenance(conn)}))
+                        last_maintenance = time.monotonic()
                     t0 = time.perf_counter()
                     with conn.transaction():
                         grants = store.schedule_pass(conn)
