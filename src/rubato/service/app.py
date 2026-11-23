@@ -97,7 +97,13 @@ def _client(conn, authorization: str | None) -> dict:
 
 
 def _job_id(client: dict, jid: str) -> str:
-    return jid if ":" in jid else f"{client['id']}:{jid}"
+    """Client ids may contain ':' or '/'. Only an id already carrying the caller's own
+    prefix (or any prefixed id, for the administrator) is taken as a full id."""
+    if jid.startswith(f"{client['id']}:"):
+        return jid
+    if client["role"] == "admin" and ":" in jid:
+        return jid
+    return f"{client['id']}:{jid}"
 
 
 def _idempotent(op: str, key: str | None, body, auth, fn, status_ok: int = 200):
@@ -169,7 +175,7 @@ def post_job(
     )
 
 
-@app.get("/v1/jobs/{jid}")
+@app.get("/v1/jobs/{jid:path}")
 def get_job(jid: str, authorization: str | None = Header(None)):
     def run(conn):
         c = _client(conn, authorization)
@@ -178,7 +184,7 @@ def get_job(jid: str, authorization: str | None = Header(None)):
     return tx(run)
 
 
-@app.post("/v1/jobs/{jid}/cancel")
+@app.post("/v1/jobs/{jid:path}/cancel")
 def cancel(jid: str, authorization: str | None = Header(None)):
     def run(conn):
         c = _client(conn, authorization)

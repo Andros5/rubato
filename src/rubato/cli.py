@@ -151,7 +151,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--deadline-minutes", type=int, default=60)
     s.add_argument("--out", default="private/eval")
     s.set_defaults(fn=cmd_evaluate)
+
+    s = sub.add_parser("demo-service", help="two clients share one quota on a running service (synthetic)")
+    s.add_argument("rest", nargs=argparse.REMAINDER)
+    s.set_defaults(fn=cmd_demo_service)
     return p
+
+
+def cmd_demo_service(a: argparse.Namespace) -> int:
+    from .demo_service import main as demo_main
+
+    return demo_main(a.rest)
 
 
 def main(argv: list[str] | None = None) -> int:

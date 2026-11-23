@@ -233,3 +233,26 @@ def test_restart_preserves_jobs_and_audit():
         ok(c.post(f"/v1/attempts/{p['attempt']}/finish", json={"status": "ok", "usage": {"requests": 1}}))
         assert ok(c.get("/v1/jobs/survivor"))["state"] == "done"
         assert [d["action"] for d in ok(c.get("/v1/decisions", params={"job": "survivor"}))] == ["authorize"]
+
+
+def test_client_job_ids_may_contain_colons_and_slashes():
+    reset(TEN)
+    jid = "campaign/google:H:fam-1:primary/patient/abc/1"
+    with client("citalab") as c:
+        ok(c.post("/v1/jobs", json=job(jid)), 201)
+        p = ok(c.post("/v1/claims", json={"job": jid, "step": "s"}))["permit"]
+        assert p and p["job"] == f"citalab:{jid}"
+        assert ok(c.get(f"/v1/jobs/{jid}"))["id"] == f"citalab:{jid}"
+        assert ok(c.post(f"/v1/jobs/{jid}/cancel"))["state"] == "cancelled"
+
+
+def test_a_claim_for_one_step_does_not_grant_another_step_of_the_same_client():
+    reset(TEN)
+    with client("radar") as c:
+        ok(c.post("/v1/jobs", json=job("older")), 201)
+        ok(c.post("/v1/jobs", json=job("newer")), 201)
+        p = ok(c.post("/v1/claims", json={"job": "newer", "step": "s"}))["permit"]
+        assert p and p["job"] == "radar:newer"
+        assert [
+            a["job_id"] for a in ok(client("admin").get("/v1/admin/attempts", params={"state": "granted"}))
+        ] == ["radar:newer"]
