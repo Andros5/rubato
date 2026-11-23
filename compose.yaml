@@ -1,0 +1,53 @@
+# Local environment: API + planner + PostgreSQL + simulated provider. No real keys.
+name: rubato
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: rubato
+      POSTGRES_PASSWORD: rubato-local-only
+      POSTGRES_DB: rubato
+    ports: ["127.0.0.1:${RUBATO_DB_PORT:-55432}:5432"]
+    volumes: [dbdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rubato -d rubato"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    build: .
+    image: rubato:${RUBATO_VERSION:-1.0.0}
+    environment: &env
+      RUBATO_DSN: postgresql://rubato:rubato-local-only@db:5432/rubato
+      RUBATO_CLIENTS: ${RUBATO_CLIENTS:-admin:admin-local-token:admin:0,radar:radar-local-token:client:1,citalab:citalab-local-token:client:1}
+      RUBATO_TEST_CLOCK: ${RUBATO_TEST_CLOCK:-1}
+      RUBATO_GRANT_TTL: ${RUBATO_GRANT_TTL:-60}
+      RUBATO_ATTEMPT_TIMEOUT: ${RUBATO_ATTEMPT_TIMEOUT:-600}
+    command: ["uvicorn", "rubato.service.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    ports: ["127.0.0.1:${RUBATO_API_PORT:-8000}:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/readyz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  scheduler:
+    image: rubato:${RUBATO_VERSION:-1.0.0}
+    environment: *env
+    command: ["python", "-m", "rubato.service.scheduler"]
+    depends_on:
+      api: {condition: service_healthy}
+  provider:
+    image: rubato:${RUBATO_VERSION:-1.0.0}
+    environment:
+      RUBATO_PROVIDER_DB: /data/receipts.sqlite
+    command: ["uvicorn", "rubato.service.provider_sim:app", "--host", "0.0.0.0", "--port", "8100"]
+    ports: ["127.0.0.1:${RUBATO_PROVIDER_PORT:-8100}:8100"]
+    volumes: [providerdata:/data]
+    user: "0"
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  dbdata:
+  providerdata:

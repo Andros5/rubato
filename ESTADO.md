@@ -7,12 +7,12 @@
 | F2 · Simulador | Completa |
 | F3 · Políticas | Completa |
 | F4 · Evaluación y demo | Completa (umbrales del piloto pendientes de acuerdo; jornadas prospectivas pendientes) |
-| F5 · Servicio | Pendiente |
+| F5 · Servicio | Completa |
 | F6 · Integraciones | Pendiente |
 | F7 · Operación y Kubernetes | Pendiente |
 | F8 · Distribución | Pendiente |
 
-**Siguiente tarea.** F5: servicio FastAPI + PostgreSQL con admisión transaccional, SDK y Compose.
+**Siguiente tarea.** F6: adaptadores en ramas aisladas de swiss-job-radar y citalab con modos off/shadow/enforce.
 
 ## Evidencia por fase
 
@@ -84,3 +84,16 @@
   - Historial privado (agregados): prueba 19–21 nov, radar 15/15 urgentes y 54/56 fondo; `reserva-rpd2` idéntico → **veredicto: política por defecto `radar`** (empate). Diseño 69/82 urgentes con ambas políticas.
 - Supuesto o limitación: reordenar llamadas históricas no muestra qué habría respondido el proveedor; plazos urgentes hipotéticos (60 min); el bloque de ajuste no contiene urgencias; el perfil de límites es el declarado por el radar, no observado; 2 trabajadores concurrentes supuestos.
 - Próxima tarea concreta: F5.
+
+### F5 · Servicio de admisión con contabilidad duradera
+- Estado: completa.
+- Fecha: 2026-11-23.
+- Cambio entregado: `src/rubato/service/` — migración `0001_init.sql` (clientes, configuración versionada, recursos, trabajos, pasos, intentos, libro, pausas, decisiones, eventos, idempotencia; índices de pasos listos, reconsideración, permisos por caducar y un intento vivo por paso), `store.py` (ronda de admisión con `core.decidir`, todas las dimensiones o ninguna, caducidad de permisos, intentos `unknown`, conciliación, 429, cancelación, observaciones `shadow`), `app.py` (FastAPI, autenticación por token, idempotencia, ID de correlación, registros JSON), `scheduler.py`, `provider_sim.py` (recibos persistentes), `sdk.py` (`RubatoClient` y `Gate` con modos `off`/`shadow`/`enforce`), `Dockerfile`, `compose.yaml`, `docs/servicio.md` (flujo y D10).
+- Pruebas ejecutadas (PostgreSQL 17 real en Docker 29.1.2, 2 workers de API + planificador):
+  - `docker compose down -v; docker compose up -d --build` → entorno limpio, `/readyz` = `{"ok":true,"schema":"0001_init.sql"}`.
+  - `RUBATO_TEST_API=http://127.0.0.1:8000 RUBATO_TEST_COMPOSE=1 .\.venv\Scripts\python.exe -m pytest -q -m postgres` → `10 passed in 18.09s`.
+  - Las pruebas de concurrencia y caídas, repetidas 5 veces seguidas → `4 passed` cada vez.
+  - Suite local sin servicio → `74 passed, 11 skipped`.
+- Evidencia reproducible (`tests/test_f5_service.py`): con capacidad 1, 20 `claims` concurrentes de dos clientes → exactamente 1 permiso y saldo 1/0; alta, inicio y fin repetidos → misma respuesta y consumo 1 (parámetros distintos con la misma clave → 409); caída antes del inicio → permiso caducado a los 61 s, reasignado, `start` del viejo → `409 permit_expired`; caída después del inicio → `unknown` a los 601 s, saldo usado 1 con 1 incierto, sin reintento a ciegas, conciliación con el recibo del proveedor simulado → `done`; sin recibo → liberado y reasignado; aislamiento entre clientes y límites solo para el administrador; 429 → `provider_pause` hasta `retry_after`; tope de tokens sin máximo → `orientative`; la política `reserva` funciona en el servicio con el mismo núcleo; `docker compose restart api scheduler` conserva trabajo, intento iniciado y auditoría.
+- Supuesto o limitación: todas las transacciones mutantes se serializan (D10); el reloj de prueba (`RUBATO_TEST_CLOCK=1`) está activo en el Compose local para poder ensayar caducidades.
+- Próxima tarea concreta: F6.
