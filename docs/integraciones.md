@@ -20,6 +20,11 @@ Probado con transporte simulado (radar 109 pruebas de las rutas afectadas, CitaL
 completa y `reproduce.py` intacto) y, en el radar, contra el servicio real: tras poner
 `enforce` en el panel, el adaptador devolvió `enforce`.
 
+## Codex (radar `ea982a4`)
+
+Las llamadas Codex del radar pasan por la misma admisión (`CodexAI._reserve_codex`); un rechazo
+pausa la tarea como los topes locales de Codex. Suite completa del radar en la rama: **521 passed, 3 skipped**.
+
 ## Modos
 
 | Modo | Radar (`RADAR_RUBATO_MODE`) | CitaLab (`CITALAB_RUBATO_MODE`) |
