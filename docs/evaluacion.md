@@ -43,8 +43,10 @@ igual que `calls.day`). Llegadas `derived` (cota superior). Comando:
 
 **Veredicto:** la reserva empata con la referencia en el bloque de prueba (ganancia
 urgente 0). Según el plan, **la política por defecto es `radar`** y el simulador sigue
-siendo el producto. Motivo observable: en el historial las urgencias que no terminan a
-tiempo fallan por salidas inválidas o errores del proveedor, no por cuota; y el bloque
+siendo el producto. Motivo observable: en el bloque de diseño, de las 13 urgencias que no terminan a
+tiempo con `radar`, 8 terminan tarde porque sus intentos registrados (reintentos y
+duraciones) superan el plazo hipotético de 60 min y 5 fallan por `max_attempts`
+(salidas inválidas o errores); ninguna espera por cuota. El bloque
 de ajuste no tiene ninguna urgencia, así que la elección de variante no está
 informada. Con 71 trabajos en prueba el resultado es indicativo.
 
