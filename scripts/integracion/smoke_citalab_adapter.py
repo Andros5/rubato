@@ -32,7 +32,9 @@ for mode in ("shadow", "enforce"):
         c = ChatClient(providers["google"], cfg, sleep=lambda _: None, gate=gate)
         c._http.close()
         c._http = httpx.Client(
-            transport=httpx.MockTransport(lambda r, sent=sent: (sent.append(1), httpx.Response(200, json=OK))[1])
+            transport=httpx.MockTransport(
+                lambda r, sent=sent: (sent.append(1), httpx.Response(200, json=OK))[1]
+            )
         )
         try:
             with rubato.episode(f"google:H:fam-{k}:primary", "smoke"):

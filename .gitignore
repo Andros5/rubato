@@ -28,3 +28,6 @@ informe*.html
 
 # Kubernetes secrets for the local test cluster
 deploy/k8s/secrets.env
+
+# build artefacts
+dist/

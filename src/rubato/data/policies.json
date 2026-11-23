@@ -1,0 +1,13 @@
+{
+  "version": "rubato.policies/v1",
+  "frozen_at": "2026-11-23",
+  "note": "Parameters frozen before evaluation. Change them only with a new frozen_at and a new evaluation.",
+  "policies": {
+    "radar": {"name": "radar"},
+    "fifo": {"name": "fifo"},
+    "reserva": {"name": "reserva", "reserve": {"rpd": 4}, "release_offset": 37800, "aging_limit": null, "impossible": "run"}
+  },
+  "grid": {
+    "reserva": {"reserve": {"rpd": [0, 2, 8]}}
+  }
+}
