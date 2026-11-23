@@ -45,6 +45,14 @@ async def lifespan(app: FastAPI):
                 with conn.transaction():
                     store.bootstrap_clients(conn, os.environ["RUBATO_CLIENTS"])
             _json_log(logging.INFO, "startup", migrations=applied)
+            weak = store.example_token_clients(conn)
+            conn.commit()
+            if weak:
+                _json_log(
+                    logging.WARNING,
+                    "example tokens in use; set RUBATO_CLIENTS before exposing the service",
+                    clients=weak,
+                )
     yield
     POOL.close()
 
