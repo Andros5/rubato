@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 
 from .core import Capacity, Demand
 from .model import ReadyItem, Reason
@@ -118,6 +119,15 @@ class ReservePolicy(_Base):
     def on_impossible(self, item: ReadyItem) -> str:
         return self.impossible if item.urgent else "run"
 
+    def reserve_for(self, rid: str) -> int | None:
+        """Reserve configured for a resource id; keys may be glob patterns such as ``rpd:*``."""
+        if rid in self.reserve:
+            return self.reserve[rid]
+        for pat, v in self.reserve.items():
+            if fnmatchcase(rid, pat):
+                return v
+        return None
+
     def _release_instant(self, now: int, spec: ResourceSpec) -> int | None:
         times = []
         if self.release_at is not None:
@@ -136,7 +146,8 @@ class ReservePolicy(_Base):
         demand: Sequence[Demand],
         round_alloc: dict[tuple[str, bool], int],
     ) -> tuple[int, int | None]:
-        if spec.id not in self.reserve:
+        amount = self.reserve_for(spec.id)
+        if amount is None:
             return 0, None
         rel = self._release_instant(now, spec)
         released = rel is not None and now >= rel
@@ -146,7 +157,7 @@ class ReservePolicy(_Base):
             urgent_used = capacity.ledger.used(spec.id, now, urgent=True) + round_alloc.get(
                 (spec.id, True), 0
             )
-            speculative = max(0, self.reserve[spec.id] - urgent_used)
+            speculative = max(0, amount - urgent_used)
         known = sum(spec.need_of(d.remaining_need) for d in demand if d.urgent)
         known = max(0, known - round_alloc.get((spec.id, True), 0))
         held = max(speculative, known)

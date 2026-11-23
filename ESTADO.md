@@ -6,13 +6,13 @@
 | F1 · Trazas | Completa (jornadas prospectivas pendientes de evidencia) |
 | F2 · Simulador | Completa |
 | F3 · Políticas | Completa |
-| F4 · Evaluación y demo | Pendiente |
+| F4 · Evaluación y demo | Completa (umbrales del piloto pendientes de acuerdo; jornadas prospectivas pendientes) |
 | F5 · Servicio | Pendiente |
 | F6 · Integraciones | Pendiente |
 | F7 · Operación y Kubernetes | Pendiente |
 | F8 · Distribución | Pendiente |
 
-**Siguiente tarea.** F4: escenarios versionados, CLI `simulate`/`compare`, informe HTML y evaluación por bloques de fechas.
+**Siguiente tarea.** F5: servicio FastAPI + PostgreSQL con admisión transaccional, SDK y Compose.
 
 ## Evidencia por fase
 
@@ -71,3 +71,16 @@
   - Relleno: `small` adelanta a `big` con motivo `backfill`; la explicación de `big` dice `DEFERRED [rate_limited] ... reconsider t=60`.
 - Supuesto o limitación: el optimizador trabaja en tiempo discreto, toma el primer intento de la traza y no admite ventanas de calendario con zona horaria; es una cota bajo las hipótesis del escenario, no una política.
 - Próxima tarea concreta: F4.
+
+### F4 · Evaluación y primera demo utilizable
+- Estado: completa. Pendiente de evidencia: acuerdo de Andrés sobre los umbrales del piloto (`config/piloto.json`, marcados como propuesta) y jornadas prospectivas observadas para ampliar el bloque de prueba.
+- Fecha: 2026-11-23.
+- Cambio entregado: `scenario.py` (escenarios versionados `rubato.scenarios/v1` con urgencia inyectada `hypothetical`, pico, cuota reducida, factor de consumo, consumo ajeno, día sin urgencias), `runs.py` (manifiesto con huella de traza, commit, supuestos y configuración congelada), `report.py` (HTML autocontenido: dos líneas de tiempo, filtros por cliente/clase/recurso, ficha de decisión, resumen por objetivo con ganador visible, cuota disponible y pendientes, tabla de trabajos, modo oscuro), `evaluate.py` (bloques diseño/ajuste/prueba, regla de selección fija, veredicto con umbrales del piloto, resultados por día con denominadores), CLI `simulate`, `compare`, `explain`, `evaluate`; `examples/demo.jsonl` (semilla 7), `examples/scenarios.json`, `examples/policies.json` y `examples/policies-radar.json` (congeladas 2026-11-23), perfil `examples/profiles/radar-declared-2026-11-09.json`, resultados versionados en `examples/resultados/urgencia-tardia/`, `docs/evaluacion.md`, `docs/escenarios-sinteticos.txt`.
+- Pruebas ejecutadas: `.\.venv\Scripts\python.exe -m pytest -q` → `74 passed, 1 skipped`; `ruff check` limpio. Revisión visual del informe en el navegador integrado (líneas de tiempo, ficha de la candidatura con `rpd: needs 1, 0 available; reconsiderar 08:00:00 UTC`, gráficos de cuota y pendientes).
+- Evidencia reproducible:
+  - `rubato simulate --trace examples/demo.jsonl --scenario urgencia-tardia --policies radar,reserva --out runs/demo` → radar: urgentes 0/1, fondo 111/120; reserva: urgentes 1/1, fondo 109/120.
+  - `rubato compare --run runs/demo --report informe.html` → HTML sin red (la prueba comprueba que no hay URL, `<script src>` ni `<link href>`).
+  - Siete escenarios sintéticos en `docs/evaluacion.md`: la reserva gana la urgencia en 5, da igual en `urgencia-temprana` y en `sin-urgencia` solo empeora la espera p95 del fondo (109 → 165 s).
+  - Historial privado (agregados): prueba 19–21 nov, radar 15/15 urgentes y 54/56 fondo; `reserva-rpd2` idéntico → **veredicto: política por defecto `radar`** (empate). Diseño 69/82 urgentes con ambas políticas.
+- Supuesto o limitación: reordenar llamadas históricas no muestra qué habría respondido el proveedor; plazos urgentes hipotéticos (60 min); el bloque de ajuste no contiene urgencias; el perfil de límites es el declarado por el radar, no observado; 2 trabajadores concurrentes supuestos.
+- Próxima tarea concreta: F5.

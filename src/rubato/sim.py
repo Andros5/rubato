@@ -94,6 +94,9 @@ class SimResult:
     end_t: int
     decision_latency_us: list[float]
     max_queue: int
+    usage_log: list[tuple[str, int, int, bool, str]] = field(
+        default_factory=list
+    )  # rid, t, amount, urgent, owner
 
     def by_id(self) -> dict[str, JobResult]:
         return {r.job.id: r for r in self.jobs}
@@ -466,6 +469,12 @@ class Simulator:
             end_t=t,
             decision_latency_us=latencies,
             max_queue=max_queue,
+            usage_log=sorted(
+                (e.resource, e.t, e.amount, e.urgent, e.attempt_id)
+                for es in ledger.entries.values()
+                for e in es
+                if e.state in ("confirmed", "unknown") and ledger.specs[e.resource].window != "concurrency"
+            ),
         )
 
 

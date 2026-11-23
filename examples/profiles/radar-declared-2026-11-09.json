@@ -1,0 +1,149 @@
+{
+  "version": "rubato.profile/v1",
+  "id": "radar-declared-2026-11-09",
+  "source": "swiss-job-radar radar/ai_config.py defaults (pricing_reviewed 2026-11-09); AI Studio free-tier limits as declared by the radar, not observed",
+  "assumptions": [
+    "Gemini daily quotas reset at midnight America/Los_Angeles",
+    "Codex daily_limit 50 counted per Europe/Zurich day",
+    "two concurrent workers (hypothetical: the radar claims one task per loop but runs analysis batches)",
+    "gemma models have no local limit"
+  ],
+  "resources": [
+    {
+      "id": "rpm:gemini-3.8-flash",
+      "unit": "requests",
+      "capacity": 5,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.8-flash"
+      }
+    },
+    {
+      "id": "tpm:gemini-3.8-flash",
+      "unit": "tokens_in",
+      "capacity": 250000,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.8-flash"
+      }
+    },
+    {
+      "id": "rpd:gemini-3.8-flash",
+      "unit": "requests",
+      "capacity": 20,
+      "window": "calendar",
+      "reset_tz": "America/Los_Angeles",
+      "scope": {
+        "model": "gemini-3.8-flash"
+      }
+    },
+    {
+      "id": "rpm:gemini-3.6-flash",
+      "unit": "requests",
+      "capacity": 5,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.6-flash"
+      }
+    },
+    {
+      "id": "tpm:gemini-3.6-flash",
+      "unit": "tokens_in",
+      "capacity": 250000,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.6-flash"
+      }
+    },
+    {
+      "id": "rpd:gemini-3.6-flash",
+      "unit": "requests",
+      "capacity": 20,
+      "window": "calendar",
+      "reset_tz": "America/Los_Angeles",
+      "scope": {
+        "model": "gemini-3.6-flash"
+      }
+    },
+    {
+      "id": "rpm:gemini-3.5-flash-lite",
+      "unit": "requests",
+      "capacity": 15,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.5-flash-lite"
+      }
+    },
+    {
+      "id": "tpm:gemini-3.5-flash-lite",
+      "unit": "tokens_in",
+      "capacity": 250000,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.5-flash-lite"
+      }
+    },
+    {
+      "id": "rpd:gemini-3.5-flash-lite",
+      "unit": "requests",
+      "capacity": 500,
+      "window": "calendar",
+      "reset_tz": "America/Los_Angeles",
+      "scope": {
+        "model": "gemini-3.5-flash-lite"
+      }
+    },
+    {
+      "id": "rpm:gemini-3.1-flash-lite",
+      "unit": "requests",
+      "capacity": 15,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.1-flash-lite"
+      }
+    },
+    {
+      "id": "tpm:gemini-3.1-flash-lite",
+      "unit": "tokens_in",
+      "capacity": 250000,
+      "window": "rolling",
+      "length": 60,
+      "scope": {
+        "model": "gemini-3.1-flash-lite"
+      }
+    },
+    {
+      "id": "rpd:gemini-3.1-flash-lite",
+      "unit": "requests",
+      "capacity": 500,
+      "window": "calendar",
+      "reset_tz": "America/Los_Angeles",
+      "scope": {
+        "model": "gemini-3.1-flash-lite"
+      }
+    },
+    {
+      "id": "rpd:gpt-6-luna",
+      "unit": "requests",
+      "capacity": 50,
+      "window": "calendar",
+      "reset_tz": "Europe/Zurich",
+      "scope": {
+        "model": "gpt-6-luna"
+      }
+    },
+    {
+      "id": "workers",
+      "unit": "concurrent",
+      "capacity": 2,
+      "window": "concurrency"
+    }
+  ]
+}

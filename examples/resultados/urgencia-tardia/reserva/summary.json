@@ -1,0 +1,94 @@
+{
+  "background": {
+    "by_class": {
+      "eval": {
+        "cancelled": 0,
+        "done": 11,
+        "done_late": 0,
+        "done_on_time": 11,
+        "failed": 1,
+        "oldest_pending_age": null,
+        "pending": 0,
+        "received": 12,
+        "wait_p50": 0,
+        "wait_p95": 0
+      },
+      "match": {
+        "cancelled": 0,
+        "done": 98,
+        "done_late": 0,
+        "done_on_time": 98,
+        "failed": 0,
+        "oldest_pending_age": 7297,
+        "pending": 10,
+        "received": 108,
+        "wait_p50": 55,
+        "wait_p95": 165
+      }
+    },
+    "cancelled": 0,
+    "done": 109,
+    "done_late": 0,
+    "done_on_time": 109,
+    "failed": 1,
+    "oldest_pending_age": 7297,
+    "pending": 10,
+    "received": 120,
+    "wait_p50": 55,
+    "wait_p95": 165
+  },
+  "by_arrival_provenance": {
+    "hypothetical": {
+      "done": 1
+    },
+    "synthetic": {
+      "done": 109,
+      "failed": 1,
+      "pending": 10
+    }
+  },
+  "closes_by_reason": {
+    "dependency_failed": 1,
+    "max_attempts": 1
+  },
+  "consumption": {
+    "attempt_status": {
+      "error": 4,
+      "invalid": 12,
+      "ok": 134
+    },
+    "attempts": 150,
+    "consumed": {
+      "rpd": 150,
+      "rpm": 150,
+      "tpm": 1244020
+    },
+    "estimated_usage_attempts": 2,
+    "observed_usage_attempts": 148
+  },
+  "deferrals_by_reason": {
+    "capacity_exhausted": 10,
+    "deadline_reserve": 12,
+    "rate_limited": 488
+  },
+  "planner": {
+    "decision_rounds": 283,
+    "latency_us_p50": 985.7,
+    "latency_us_p95": 7585.5,
+    "max_ready_queue": 14
+  },
+  "policy": "reserva@1",
+  "urgent": {
+    "cancelled": 0,
+    "done": 1,
+    "done_late": 0,
+    "done_on_time": 1,
+    "failed": 0,
+    "oldest_pending_age": null,
+    "on_time_ratio": "1/1",
+    "pending": 0,
+    "received": 1,
+    "wait_p50": 0,
+    "wait_p95": 0
+  }
+}
