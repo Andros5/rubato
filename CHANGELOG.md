@@ -11,7 +11,7 @@
   `GET /v1/mode`, `PUT /v1/admin/clients/{id}/mode`; SDK `Gate(mode="auto")` and the
   radar and CitaLab adapters (`auto`) follow the switch within 30 s and keep the last
   known mode if Rubato is unreachable.
-- `rubato status` (the panel in the terminal) and `scripts/ops/arranque_windows.ps1` (optional
+- `rubato why radar:<id>` (every decision about a live job) and `rubato status` (the panel in the terminal) and `scripts/ops/arranque_windows.ps1` (optional
   start at logon; not registered automatically). CI also checks formatting.
 - Planner: hourly housekeeping of idempotency keys older than 7 days (`RUBATO_IDEMPOTENCY_DAYS`),
   run once at start; its logs were never printed (`basicConfig` without `force`) and now are.

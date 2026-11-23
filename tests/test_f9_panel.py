@@ -85,3 +85,20 @@ def test_auto_mode_is_cached():
 def test_auto_mode_starts_off_until_the_service_answers():
     rc, _ = fake_service([httpx.ConnectError("down")])
     assert Gate(rc, "auto").current_mode() == "off"
+
+
+@pytest.mark.postgres
+@needs_service
+def test_why_explains_a_live_job(capsys):
+    from service_helpers import TOKENS
+
+    from rubato.cli import main
+
+    reset([{"id": "quota", "unit": "requests", "capacity": 1, "window": "total"}])
+    with client("radar") as r:
+        ok(r.post("/v1/jobs", json=job("first")), 201)
+        ok(r.post("/v1/jobs", json=job("second")), 201)
+        ok(r.post("/v1/claims", json={}))
+    assert main(["why", "radar:second", "--api", API, "--token", TOKENS["admin"]]) == 0
+    out = capsys.readouterr().out
+    assert "radar:second (match) state active" in out and "DEFER [capacity_exhausted]" in out
