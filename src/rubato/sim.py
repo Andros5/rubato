@@ -109,6 +109,7 @@ class Simulator:
         horizon: int | None = None,
         max_iterations: int = 1_000_000,
         log_all_deferrals: bool = False,
+        tariff=None,
     ):
         ids = [j.id for j in jobs]
         if len(set(ids)) != len(ids):
@@ -121,6 +122,15 @@ class Simulator:
         self.horizon = horizon
         self.max_iterations = max_iterations
         self.log_all = log_all_deferrals
+        self.tariff = tariff
+
+    def _admission(self, step) -> dict[str, int]:
+        amt = step.admission_amount()
+        return self.tariff.with_cost(step.model, amt) if self.tariff else amt
+
+    def _usage(self, step, usage: dict[str, int]) -> dict[str, int]:
+        u = tokens_total(usage)
+        return self.tariff.with_cost(step.model, u) if self.tariff else u
 
     # ------------------------------------------------------------------
     def run(self) -> SimResult:
@@ -207,7 +217,7 @@ class Simulator:
             for s in job.steps:
                 st = state[(job.id, s.id)].status
                 if st in ("waiting", "ready") or (include_running and st == "running"):
-                    for k, v in s.admission_amount().items():
+                    for k, v in self._admission(s).items():
                         need[k] = need.get(k, 0) + v
                     dur += s.duration_estimate  # conservative: sequential critical path
             return need, dur
@@ -229,7 +239,7 @@ class Simulator:
                     step = job.step(rec.step_id)
                     st = state[(rec.job_id, rec.step_id)]
                     out, _ = step.outcome(rec.attempt)
-                    ledger.settle(rec.attempt_id, tokens_total(out.usage))
+                    ledger.settle(rec.attempt_id, self._usage(step, out.usage))
                     if st.status == "cancelled_running":
                         st.status = "closed"
                         st.reason = Reason.CANCELLED
@@ -364,7 +374,7 @@ class Simulator:
                             step_id=s.id,
                             attempt=st.attempts + 1,
                             ready_since=st.ready_since if st.ready_since is not None else t,
-                            need=s.admission_amount(),
+                            need=self._admission(s),
                             remaining_need=rem_need,
                             remaining_duration=rem_dur,
                             model=s.model,
@@ -389,7 +399,7 @@ class Simulator:
                     st.started.append(t)
                     out, from_trace = step.outcome(st.attempts)
                     aid = f"{job.id}/{step.id}/{st.attempts}"
-                    admitted = step.admission_amount()
+                    admitted = self._admission(step)
                     for spec in [r for r in self.resources if r.applies(job.client, step.model)]:
                         ledger.book(spec.id, t, spec.need_of(admitted), aid, job.urgent, job.client)
                     rec = AttemptRecord(
@@ -400,7 +410,7 @@ class Simulator:
                         t,
                         t + out.duration,
                         str(out.status),
-                        tokens_total(out.usage),
+                        self._usage(step, out.usage),
                         admitted,
                         from_trace,
                     )
@@ -459,8 +469,8 @@ class Simulator:
         )
 
 
-def simulate(jobs, resources, policy, events=(), horizon=None) -> SimResult:
-    return Simulator(jobs, resources, policy, events, horizon).run()
+def simulate(jobs, resources, policy, events=(), horizon=None, tariff=None) -> SimResult:
+    return Simulator(jobs, resources, policy, events, horizon, tariff=tariff).run()
 
 
 __all__ = ["ExternalEvent", "SimResult", "Simulator", "simulate", "Outcome"]
