@@ -32,3 +32,6 @@ deploy/k8s/secrets.env
 # build artefacts
 dist/
 !deploy/k8s/secrets.env.example
+
+# local development tool settings
+.claude/
