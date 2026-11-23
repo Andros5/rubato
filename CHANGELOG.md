@@ -18,6 +18,7 @@
   run once at start; its logs were never printed (`basicConfig` without `force`) and now are.
 - `GET /v1/admin/overview` and `rubato shadow-report` (agreement, divergences, added
   latency, readiness for enforce).
+- Radar adapter (branch `rubato-adapter`, `ea982a4`): Codex calls are coordinated too.
 - Security: the startup log and the panel warn when the example tokens of compose.yaml are
   still in use.
 - Reserve policy: urgent work that can no longer meet its deadline is not protected when
