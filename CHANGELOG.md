@@ -18,6 +18,8 @@
   run once at start; its logs were never printed (`basicConfig` without `force`) and now are.
 - `GET /v1/admin/overview` and `rubato shadow-report` (agreement, divergences, added
   latency, readiness for enforce).
+- Security: the startup log and the panel warn when the example tokens of compose.yaml are
+  still in use.
 - Reserve policy: urgent work that can no longer meet its deadline is not protected when
   `impossible` is `background` or `drop` (it used to keep holding quota from the background).
 - Fix: a focused claim (adapter asking for one step) released the speculative permits the

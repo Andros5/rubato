@@ -1147,6 +1147,16 @@ def set_mode(conn, admin: dict, cid: str, mode: str) -> dict:
     return {"client": cid, "mode": mode, "changed_at": t}
 
 
+EXAMPLE_TOKENS = ("admin-local-token", "radar-local-token", "citalab-local-token")
+
+
+def example_token_clients(conn) -> list[str]:
+    """Clients still using the example tokens published in compose.yaml."""
+    hashes = [hash_token(t) for t in EXAMPLE_TOKENS]
+    rows = conn.execute("SELECT id FROM clients WHERE token_hash = ANY(%s) ORDER BY id", (hashes,)).fetchall()
+    return [r["id"] for r in rows]
+
+
 def overview(conn, decisions_limit: int = 60) -> dict:
     """Everything the live panel shows, in one read-only snapshot."""
     t = now(conn)
@@ -1209,6 +1219,7 @@ def overview(conn, decisions_limit: int = 60) -> dict:
     ).fetchall()
     return {
         "shadow_24h": shadow,
+        "example_tokens": example_token_clients(conn),
         "t": t,
         "resources": resources,
         "clients": clients,
