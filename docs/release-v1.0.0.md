@@ -21,6 +21,7 @@ Windows 11 Pro 10.0.26300, Python 3.13.1, Docker Desktop 29.1.2, PostgreSQL 17-a
 | Restauración | `restore_drill.py` | trazabilidad y decisiones conservadas |
 | Réplicas | `ha_drill.py` (2 réplicas, 2 consumidores) | 0 duplicados, descuadre 0, reatención 6,2 s con TTL 5 s |
 | Optimizador | CP-SAT = enumeración | 25/25 instancias |
+| Kubernetes local (kind 0.33.0) | `k8s_up.ps1`, suite `-m postgres`, `ha_drill.py` | 16 passed; 0 duplicados, descuadre 0, reatención 5,0 s |
 
 ## Observado en los proyectos de Andrés
 
@@ -43,8 +44,6 @@ Windows 11 Pro 10.0.26300, Python 3.13.1, Docker Desktop 29.1.2, PostgreSQL 17-a
 
 - Jornadas `shadow` reales en el radar y CitaLab, y activación progresiva en `enforce`.
 - Una jornada real con ambos clientes compitiendo por el mismo límite.
-- Ensayo en clúster Kubernetes local (falta `kind` o activar Kubernetes en Docker
-  Desktop); los manifiestos están listos y validados con `kubectl kustomize`.
 - CI en Linux (no hay repositorio remoto; el flujo existe en `.github/workflows/ci.yml`).
 - Piloto con un mantenedor externo (`docs/piloto.md`).
 - Acuerdo sobre los umbrales del piloto (`config/piloto.json`, propuesta).

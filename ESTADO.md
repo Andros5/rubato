@@ -9,12 +9,12 @@
 | F4 · Evaluación y demo | Completa (umbrales del piloto pendientes de acuerdo; jornadas prospectivas pendientes) |
 | F5 · Servicio | Completa |
 | F6 · Integraciones | En curso: adaptadores y demo completos; jornadas `shadow` y activación real pendientes de evidencia |
-| F7 · Operación y Kubernetes | En curso: Compose completo; clúster local pendiente (falta `kind` o Kubernetes de Docker Desktop) |
+| F7 · Operación y Kubernetes | Completa (Compose y clúster local kind) |
 | F8 · Distribución | v1.0.0 local preparada; piloto externo pendiente de evidencia |
 
-**Siguiente tarea.** Criterios abiertos, por orden: (1) F7 en clúster local: instalar `kind` (o activar Kubernetes en Docker Desktop) y ejecutar `scripts/ops/k8s_up.ps1`, la suite `-m postgres` y `ha_drill.py` contra `127.0.0.1:18000`; (2) F6: `RADAR_RUBATO_MODE=shadow` en el radar durante varias jornadas con el servicio levantado y revisar `data/integrations/rubato-shadow.jsonl`; (3) F4/F1: con esas jornadas, ampliar el bloque de prueba con llegadas `observed`; (4) F8: piloto externo (`docs/piloto.md`); (5) confirmar los umbrales de `config/piloto.json`; (6) CI en Linux al crear el remoto.
+**Siguiente tarea.** Criterios abiertos, por orden: (1) F6: `RADAR_RUBATO_MODE=shadow` en el radar durante varias jornadas con el servicio levantado y revisar `data/integrations/rubato-shadow.jsonl`; (2) F4/F1: con esas jornadas, ampliar el bloque de prueba con llegadas `observed`; (3) F8: piloto externo (`docs/piloto.md`); (4) confirmar los umbrales de `config/piloto.json`; (5) CI en Linux al crear el remoto.
 
-**Pendiente de evidencia (no sustituible por datos sintéticos):** jornadas `shadow` reales, activación `enforce` progresiva, jornada real con ambos clientes compitiendo, clúster Kubernetes local, CI Linux, piloto externo, acuerdo de umbrales.
+**Pendiente de evidencia (no sustituible por datos sintéticos):** jornadas `shadow` reales, activación `enforce` progresiva, jornada real con ambos clientes compitiendo, CI Linux, piloto externo, acuerdo de umbrales.
 
 ## Evidencia por fase
 
@@ -139,3 +139,14 @@
 - Evidencia reproducible: `docs/release-v1.0.0.md`, `docs/demo.md`, `scripts/demo.ps1`.
 - Supuesto o limitación: imagen local `rubato:1.0.0` sin registro; la CI Linux no se ha ejecutado.
 - Próxima tarea concreta: la lista «Siguiente tarea» del principio de este fichero.
+
+### F7 · Cierre en clúster local (kind)
+- Estado: completa. Fecha: 2026-11-23.
+- Cambio entregado: `kind` 0.33.0 instalado con scoop (con permiso de Andrés); `scripts/ops/k8s_up.ps1` se detiene ante cualquier fallo de un comando nativo y carga la imagen como archivo de una sola plataforma (`kind load docker-image` falla con el almacén containerd de Docker: «content digest … not found»); `ha_drill.py` lee los tokens de `RUBATO_TEST_*_TOKEN`.
+- Incidencia de entorno: Docker Desktop no arrancaba (sockets `dockerInference` y `userAnalyticsOtlpHttp.sock` corruptos en `%LOCALAPPDATA%\Dockerun`, imposibles de borrar). Se renombró la carpeta a `run.stale-20261123` y Docker la recreó; no se usó «Reset to factory defaults».
+- Pruebas ejecutadas:
+  - `powershell -File scripts/ops/k8s_up.ps1` → clúster `kind-rubato`, PostgreSQL con volumen persistente, API 2 réplicas, planificador y proveedor simulado en `Running`; `/readyz` en `127.0.0.1:18000` con esquema 0002. Cada réplica de la API se reinició una vez al arrancar antes que PostgreSQL (la sonda la recupera).
+  - Misma suite de comportamiento que en Compose: `RUBATO_TEST_API=http://127.0.0.1:18000 RUBATO_TEST_PROVIDER=http://127.0.0.1:18100 RUBATO_TEST_*_TOKEN=<secrets.env> RUBATO_TEST_DSN=<port-forward> pytest -q -m postgres` → **16 passed, 1 skipped** (la omitida controla Docker Compose).
+  - `ha_drill.py --a/--b http://127.0.0.1:18000 --kill "kubectl:rubato/app=api#0,kubectl:rubato/app=api#0"` → 80 trabajos de 2 consumidores; réplica muerta durante una reserva (t=20,1 s) y otra durante una llamada simulada (t=43,1 s), ambas sustituidas por Kubernetes; trabajo interrumpido reatendido a los **5,0 s** (TTL 5 s); **0 permisos duplicados**; 80 peticiones confirmadas = 80 recibos (**descuadre 0**); 0 intentos inciertos; latencia de `claims` en el servidor p50 13,6 ms / p95 25,5 ms (registros de las réplicas supervivientes, 50 peticiones); vista por el cliente del ensayo p50 384 ms / p95 447 ms (un cliente HTTP nuevo por petición en Windows; `/healthz` con curl tarda 4 ms).
+- Entorno: Windows 11 Pro 10.0.26300, Docker Desktop 29.1.2, kind 0.33.0 (un nodo), PostgreSQL 17-alpine. Números de portátil, no extrapolables.
+- Próxima tarea concreta: la lista «Siguiente tarea» del principio.
