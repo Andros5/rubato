@@ -2,6 +2,7 @@
 name: rubato
 services:
   db:
+    restart: unless-stopped  # come back by itself when Docker Desktop starts
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: rubato
@@ -15,6 +16,7 @@ services:
       timeout: 3s
       retries: 30
   api:
+    restart: unless-stopped  # come back by itself when Docker Desktop starts
     build: .
     image: rubato:${RUBATO_VERSION:-1.1.0}
     environment: &env
@@ -33,6 +35,7 @@ services:
       timeout: 3s
       retries: 20
   api2:  # second replica for the failover drill: docker compose --profile ha up -d
+    restart: unless-stopped  # come back by itself when Docker Desktop starts
     profiles: ["ha"]
     image: rubato:${RUBATO_VERSION:-1.1.0}
     environment: *env
@@ -41,12 +44,14 @@ services:
     depends_on:
       api: {condition: service_healthy}
   scheduler:
+    restart: unless-stopped  # come back by itself when Docker Desktop starts
     image: rubato:${RUBATO_VERSION:-1.1.0}
     environment: *env
     command: ["python", "-m", "rubato.service.scheduler"]
     depends_on:
       api: {condition: service_healthy}
   provider:
+    restart: unless-stopped  # come back by itself when Docker Desktop starts
     image: rubato:${RUBATO_VERSION:-1.1.0}
     environment:
       RUBATO_PROVIDER_DB: /data/receipts.sqlite
