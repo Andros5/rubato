@@ -1,0 +1,49 @@
+{
+  "version": "rubato.scenarios/v1",
+  "scenarios": {
+    "urgencia-tardia": {
+      "description": "Jornada sintética: la cuota diaria se agota con análisis y evaluaciones; a las 17:15 UTC llega una candidatura urgente (CV + carta, plazo 45 min).",
+      "assumptions": ["la candidatura urgente es hipotética: su llegada, plazo y consumo son supuestos del escenario"],
+      "inject_urgent": [{"id": "candidatura-urgente", "hour_utc": 17.25, "deadline_minutes": 45}],
+      "horizon_hours": 32
+    },
+    "urgencia-temprana": {
+      "description": "La candidatura urgente llega a las 11:00 UTC, con cuota de sobra.",
+      "assumptions": ["la candidatura urgente es hipotética"],
+      "inject_urgent": [{"id": "candidatura-urgente", "hour_utc": 11.0, "deadline_minutes": 60}],
+      "horizon_hours": 32
+    },
+    "sin-urgencia": {
+      "description": "Día gemelo sin candidatura urgente: la reserva solo cuesta capacidad al fondo.",
+      "horizon_hours": 32
+    },
+    "pico-demanda": {
+      "description": "El doble de análisis y evaluaciones (copias desplazadas 30 min) y candidatura urgente a las 17:15 UTC.",
+      "assumptions": ["las copias del pico son sintéticas", "la candidatura urgente es hipotética"],
+      "burst_factor": 2,
+      "inject_urgent": [{"id": "candidatura-urgente", "hour_utc": 17.25, "deadline_minutes": 45}],
+      "horizon_hours": 32
+    },
+    "cuota-reducida": {
+      "description": "La cuota diaria baja al 70 % y la candidatura llega a las 15:00 UTC.",
+      "assumptions": ["la reducción de cuota es hipotética", "la candidatura urgente es hipotética"],
+      "capacity_factor": {"rpd": 0.7},
+      "inject_urgent": [{"id": "candidatura-urgente", "hour_utc": 15.0, "deadline_minutes": 45}],
+      "horizon_hours": 32
+    },
+    "estimaciones-erroneas": {
+      "description": "El consumo real de tokens es 2,5 veces la estimación; candidatura urgente a las 17:15 UTC.",
+      "assumptions": ["el factor de consumo es hipotético; las políticas siguen viendo la estimación original"],
+      "usage_factor": 2.5,
+      "inject_urgent": [{"id": "candidatura-urgente", "hour_utc": 17.25, "deadline_minutes": 45}],
+      "horizon_hours": 32
+    },
+    "consumo-ajeno": {
+      "description": "Otra aplicación consume 40 peticiones de la misma cuota a las 12:00 UTC; candidatura urgente a las 17:15 UTC.",
+      "assumptions": ["el consumo ajeno es hipotético y Rubato no lo planifica, solo lo observa en el saldo"],
+      "external": [{"hour_utc": 12.0, "requests": 40, "client": "otra-app"}],
+      "inject_urgent": [{"id": "candidatura-urgente", "hour_utc": 17.25, "deadline_minutes": 45}],
+      "horizon_hours": 32
+    }
+  }
+}

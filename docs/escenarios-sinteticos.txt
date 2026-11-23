@@ -1,0 +1,49 @@
+== consumo-ajeno.txt
+radar          urgent on time 0/1  background on time 76/120 done 76 pending 43  wait p95 109
+fifo           urgent on time 0/1  background on time 76/120 done 76 pending 43  wait p95 163
+reserva        urgent on time 1/1  background on time 75/120 done 75 pending 44  wait p95 165
+reserva-rpd0   urgent on time 0/1  background on time 76/120 done 76 pending 43  wait p95 163
+reserva-rpd2   urgent on time 1/1  background on time 75/120 done 75 pending 44  wait p95 163
+reserva-rpd8   urgent on time 1/1  background on time 75/120 done 75 pending 44  wait p95 17959
+== cuota-reducida.txt
+radar          urgent on time 0/1  background on time 72/120 done 72 pending 47  wait p95 109
+fifo           urgent on time 0/1  background on time 72/120 done 72 pending 47  wait p95 163
+reserva        urgent on time 1/1  background on time 70/120 done 70 pending 49  wait p95 165
+reserva-rpd0   urgent on time 0/1  background on time 72/120 done 72 pending 47  wait p95 163
+reserva-rpd2   urgent on time 1/1  background on time 70/120 done 70 pending 49  wait p95 163
+reserva-rpd8   urgent on time 1/1  background on time 70/120 done 70 pending 49  wait p95 17964
+== estimaciones-erroneas.txt
+radar          urgent on time 0/1  background on time 111/120 done 111 pending 8  wait p95 109
+fifo           urgent on time 0/1  background on time 111/120 done 111 pending 8  wait p95 165
+reserva        urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 165
+reserva-rpd0   urgent on time 0/1  background on time 111/120 done 111 pending 8  wait p95 165
+reserva-rpd2   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 165
+reserva-rpd8   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 2791
+== pico-demanda.txt
+radar          urgent on time 0/1  background on time 105/240 done 105 pending 133  wait p95 109
+fifo           urgent on time 0/1  background on time 105/240 done 105 pending 133  wait p95 165
+reserva        urgent on time 1/1  background on time 104/240 done 104 pending 134  wait p95 165
+reserva-rpd0   urgent on time 0/1  background on time 105/240 done 105 pending 133  wait p95 165
+reserva-rpd2   urgent on time 1/1  background on time 104/240 done 104 pending 134  wait p95 165
+reserva-rpd8   urgent on time 1/1  background on time 104/240 done 104 pending 134  wait p95 165
+== sin-urgencia.txt
+radar          urgent on time 0/0  background on time 111/120 done 111 pending 8  wait p95 109
+fifo           urgent on time 0/0  background on time 111/120 done 111 pending 8  wait p95 163
+reserva        urgent on time 0/0  background on time 111/120 done 111 pending 8  wait p95 165
+reserva-rpd0   urgent on time 0/0  background on time 111/120 done 111 pending 8  wait p95 163
+reserva-rpd2   urgent on time 0/0  background on time 111/120 done 111 pending 8  wait p95 165
+reserva-rpd8   urgent on time 0/0  background on time 111/120 done 111 pending 8  wait p95 7287
+== urgencia-tardia.txt
+radar          urgent on time 0/1  background on time 111/120 done 111 pending 8  wait p95 109
+fifo           urgent on time 0/1  background on time 111/120 done 111 pending 8  wait p95 163
+reserva        urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 165
+reserva-rpd0   urgent on time 0/1  background on time 111/120 done 111 pending 8  wait p95 163
+reserva-rpd2   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 163
+reserva-rpd8   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 2791
+== urgencia-temprana.txt
+radar          urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 109
+fifo           urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 163
+reserva        urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 165
+reserva-rpd0   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 163
+reserva-rpd2   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 163
+reserva-rpd8   urgent on time 1/1  background on time 109/120 done 109 pending 10  wait p95 7286

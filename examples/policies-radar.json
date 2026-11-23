@@ -1,0 +1,10 @@
+{
+  "version": "rubato.policies/v1",
+  "frozen_at": "2026-11-23",
+  "note": "Policies for the private radar evaluation. Frozen before looking at the tuning and test blocks.",
+  "policies": {
+    "radar": {"name": "radar"},
+    "reserva": {"name": "reserva", "reserve": {"rpd:*": 4}, "release_offset": 46800, "aging_limit": null, "impossible": "run"}
+  },
+  "grid": {"reserva": {"reserve": {"rpd:*": [2, 8, 16]}}}
+}

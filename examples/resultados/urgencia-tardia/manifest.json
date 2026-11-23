@@ -1,0 +1,162 @@
+{
+  "assumptions": [
+    "re-simulating a trace reorders recorded work; it does not show what the provider would have answered at another instant (outcomes are replayed per attempt)",
+    "all values synthetic; provider limits are declared, not observed",
+    "la candidatura urgente es hipot\u00e9tica: su llegada, plazo y consumo son supuestos del escenario"
+  ],
+  "commit": "3b83f74",
+  "horizon": 1795766400,
+  "jobs": 121,
+  "order": [
+    "radar",
+    "fifo",
+    "reserva",
+    "reserva-rpd0",
+    "reserva-rpd2",
+    "reserva-rpd8"
+  ],
+  "policies_file": {
+    "frozen_at": "2026-11-23",
+    "path": "examples/policies.json"
+  },
+  "python": "3.13.1",
+  "resources": [
+    {
+      "capacity": 6,
+      "id": "rpm",
+      "length": 60,
+      "offset": 0,
+      "reset_tz": null,
+      "scope": {
+        "model": "sim-flash"
+      },
+      "strict": true,
+      "unit": "requests",
+      "version": 1,
+      "window": "rolling"
+    },
+    {
+      "capacity": 150,
+      "id": "rpd",
+      "length": null,
+      "offset": 0,
+      "reset_tz": "America/Los_Angeles",
+      "scope": {
+        "model": "sim-flash"
+      },
+      "strict": true,
+      "unit": "requests",
+      "version": 1,
+      "window": "calendar"
+    },
+    {
+      "capacity": 120000,
+      "id": "tpm",
+      "length": 60,
+      "offset": 0,
+      "reset_tz": null,
+      "scope": {
+        "model": "sim-flash"
+      },
+      "strict": true,
+      "unit": "tokens_in",
+      "version": 1,
+      "window": "rolling"
+    }
+  ],
+  "rubato": "0.1.0",
+  "runs": {
+    "fifo": {
+      "config": {
+        "name": "fifo",
+        "version": 1
+      },
+      "policy": "fifo@1"
+    },
+    "radar": {
+      "config": {
+        "name": "radar",
+        "version": 1
+      },
+      "policy": "radar@1"
+    },
+    "reserva": {
+      "config": {
+        "aging_limit": null,
+        "impossible": "run",
+        "name": "reserva",
+        "release_at": null,
+        "release_offset": 37800,
+        "reserve": {
+          "rpd": 4
+        },
+        "version": 1
+      },
+      "policy": "reserva@1"
+    },
+    "reserva-rpd0": {
+      "config": {
+        "aging_limit": null,
+        "impossible": "run",
+        "name": "reserva",
+        "release_at": null,
+        "release_offset": 37800,
+        "reserve": {
+          "rpd": 0
+        },
+        "version": 1
+      },
+      "policy": "reserva@1"
+    },
+    "reserva-rpd2": {
+      "config": {
+        "aging_limit": null,
+        "impossible": "run",
+        "name": "reserva",
+        "release_at": null,
+        "release_offset": 37800,
+        "reserve": {
+          "rpd": 2
+        },
+        "version": 1
+      },
+      "policy": "reserva@1"
+    },
+    "reserva-rpd8": {
+      "config": {
+        "aging_limit": null,
+        "impossible": "run",
+        "name": "reserva",
+        "release_at": null,
+        "release_offset": 37800,
+        "reserve": {
+          "rpd": 8
+        },
+        "version": 1
+      },
+      "policy": "reserva@1"
+    }
+  },
+  "scenario": {
+    "assumptions": [
+      "la candidatura urgente es hipot\u00e9tica: su llegada, plazo y consumo son supuestos del escenario"
+    ],
+    "description": "Jornada sint\u00e9tica: la cuota diaria se agota con an\u00e1lisis y evaluaciones; a las 17:15 UTC llega una candidatura urgente (CV + carta, plazo 45 min).",
+    "horizon_hours": 32,
+    "inject_urgent": [
+      {
+        "deadline_minutes": 45,
+        "hour_utc": 17.25,
+        "id": "candidatura-urgente"
+      }
+    ],
+    "name": "urgencia-tardia"
+  },
+  "trace": {
+    "created_by": "rubato.synth/v1",
+    "fingerprint": "75da2a4a132f8005",
+    "path": "examples/demo.jsonl",
+    "seed": 7,
+    "time_unit": "s"
+  }
+}
