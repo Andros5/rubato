@@ -103,3 +103,26 @@ def test_upgraded_database_keeps_scheduling_old_jobs():
     finally:
         with psycopg.connect(DSN, autocommit=True) as admin:
             admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
+
+
+@pytest.mark.skipif(not DSN, reason="set RUBATO_TEST_DSN to a disposable PostgreSQL")
+def test_maintenance_expires_old_idempotency_keys_only():
+    name = f"mig_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        admin.execute(f"CREATE DATABASE {name}")
+    url = DSN.rsplit("/", 1)[0] + "/" + name
+    try:
+        with db.connect(url) as conn:
+            db.migrate(conn)
+            with conn.transaction():
+                t = store.now(conn)
+                for key, age in (("old", 8 * 86400), ("new", 3600)):
+                    conn.execute(
+                        "INSERT INTO idempotency VALUES ('radar', %s, 'jobs', 'h', 201, '{}', %s)",
+                        (key, t - age),
+                    )
+                assert store.maintenance(conn) == {"idempotency_deleted": 1}
+            assert [r["key"] for r in conn.execute("SELECT key FROM idempotency").fetchall()] == ["new"]
+    finally:
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            admin.execute(f"DROP DATABASE {name} WITH (FORCE)")

@@ -1215,3 +1215,15 @@ def overview(conn, decisions_limit: int = 60) -> dict:
         "policy": {"label": policy.label, "version": version, "config": policy.config()},
         "jobs_last_24h": {r["state"]: r["n"] for r in totals},
     }
+
+
+IDEMPOTENCY_DAYS = int(os.environ.get("RUBATO_IDEMPOTENCY_DAYS", "7"))
+
+
+def maintenance(conn) -> dict:
+    """Housekeeping that never touches the audit trail: expire old idempotency keys."""
+    t = now(conn)
+    n = conn.execute(
+        "DELETE FROM idempotency WHERE created_at < %s", (t - IDEMPOTENCY_DAYS * 86400,)
+    ).rowcount
+    return {"idempotency_deleted": n}

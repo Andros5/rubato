@@ -53,7 +53,8 @@ informada. Con 71 trabajos en prueba el resultado es indicativo.
 ## 3. Coste del planificador
 
 Latencia de decisión p95 en la demo (Windows 11, Python 3.13.1, cola ≤ 24 pasos
-listos): 4,3–8,6 ms por ronda según la política. Historial privado: 7,7 ms (radar) y
-8,5 ms (reserva) en el bloque de diseño (2.133 trabajos), 0,16–0,18 ms en el de prueba.
-El coste crece con el número de entradas del libro porque `Ledger` recorre las
-entradas vivas en cada consulta. Son medidas locales, no extrapolables a producción.
+listos), versión 1.0.0: 4,3–8,6 ms por ronda según la política. Desde la 1.0.1 el libro
+usa búsqueda binaria por ventana: en el bloque de diseño del historial privado (2.133
+trabajos) el p95 por ronda baja de 7,5 ms a 0,54 ms (radar) y de 8,6 ms a 0,72 ms
+(reserva), y la simulación completa de 17,2 s a 1,45 s, con decisiones idénticas. Son
+medidas locales, no extrapolables a producción.

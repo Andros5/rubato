@@ -181,3 +181,4 @@
   - Panel revisado en el navegador integrado con datos de demostración, en escritorio y en móvil (375 px).
 - Próxima tarea concreta: activar `RADAR_RUBATO_MODE=auto` en el radar con el servicio levantado, poner `shadow` desde el panel y, tras al menos 3 jornadas, ejecutar `rubato shadow-report data/integrations/rubato-shadow.jsonl`.
 - Añadido después de etiquetar: `rubato status` (probado contra una pila real: modos, cuota, esperas con próxima revisión), `scripts/ops/arranque_windows.ps1` (no registrado; decide Andrés) y comprobación de formato en la CI. `pytest -q` → 119 passed, 22 skipped sin servicio.
+- Mantenimiento: el planificador borra cada hora las claves de idempotencia de más de 7 días (también al arrancar); se corrigió que sus registros nunca se imprimían. Comprobado en el contenedor (`{"msg": "maintenance", "idempotency_deleted": 0}`) y con prueba en PostgreSQL. Suite con servicio → 141 passed, 1 skipped (privada).
