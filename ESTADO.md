@@ -8,11 +8,11 @@
 | F3 · Políticas | Completa |
 | F4 · Evaluación y demo | Completa (umbrales del piloto pendientes de acuerdo; jornadas prospectivas pendientes) |
 | F5 · Servicio | Completa |
-| F6 · Integraciones | Pendiente |
+| F6 · Integraciones | En curso: adaptadores y demo completos; jornadas `shadow` y activación real pendientes de evidencia |
 | F7 · Operación y Kubernetes | Pendiente |
 | F8 · Distribución | Pendiente |
 
-**Siguiente tarea.** F6: adaptadores en ramas aisladas de swiss-job-radar y citalab con modos off/shadow/enforce.
+**Siguiente tarea.** F7: métricas y registros, restauración y migración, manifiestos de Kubernetes y ensayo con dos réplicas.
 
 ## Evidencia por fase
 
@@ -97,3 +97,16 @@
 - Evidencia reproducible (`tests/test_f5_service.py`): con capacidad 1, 20 `claims` concurrentes de dos clientes → exactamente 1 permiso y saldo 1/0; alta, inicio y fin repetidos → misma respuesta y consumo 1 (parámetros distintos con la misma clave → 409); caída antes del inicio → permiso caducado a los 61 s, reasignado, `start` del viejo → `409 permit_expired`; caída después del inicio → `unknown` a los 601 s, saldo usado 1 con 1 incierto, sin reintento a ciegas, conciliación con el recibo del proveedor simulado → `done`; sin recibo → liberado y reasignado; aislamiento entre clientes y límites solo para el administrador; 429 → `provider_pause` hasta `retry_after`; tope de tokens sin máximo → `orientative`; la política `reserva` funciona en el servicio con el mismo núcleo; `docker compose restart api scheduler` conserva trabajo, intento iniciado y auditoría.
 - Supuesto o limitación: todas las transacciones mutantes se serializan (D10); el reloj de prueba (`RUBATO_TEST_CLOCK=1`) está activo en el Compose local para poder ensayar caducidades.
 - Próxima tarea concreta: F6.
+
+### F6 · Integraciones con Swiss Job Radar y CitaLab
+- Estado: en curso. Completo lo que no depende del tiempo ni de Andrés; **pendiente de evidencia**: `shadow` durante varias jornadas con tráfico real, activación progresiva en `enforce` y una jornada real con ambos clientes compitiendo.
+- Fecha: 2026-11-23.
+- Cambio entregado: rama `rubato-adapter` en swiss-job-radar (`d6d9c2e`, `30a0803`) y en citalab (`8ecfc9b`), sin fusionar; en Rubato: modo `shadow` del servicio (`claims` con `shadow`, `/v1/observations`), `claims` filtradas por paso sin conceder otros pasos del cliente, ids de trabajo con `:` y `/`, `demo_service.py` (`rubato demo-service`), `tests/test_f6_two_clients.py`, `scripts/integracion/`, `docs/integraciones.md` con guía de reversión.
+- Pruebas ejecutadas:
+  - swiss-job-radar, rama `rubato-adapter`: `.venv\Scripts\python.exe -m pytest -q` → `518 passed, 3 skipped` (7 pruebas nuevas del adaptador).
+  - citalab, rama `rubato-adapter`: `pytest -q` → `105 passed`; `python scripts/reproduce.py` → «todo coincide con lo publicado».
+  - Rubato: `pytest -q` → `74 passed, 14 skipped`; contra Compose `pytest -q -m postgres` → `13 passed` (incluida la demo de dos clientes, ids con `:`/`/` y petición filtrada).
+  - Humo de los adaptadores reales contra el servicio de Compose (`scripts/integracion/*.py`): radar `shadow` registra la divergencia `defer/deadline_reserve` sin bloquear; radar `enforce` aplaza el segundo análisis y deja pasar el CV urgente sin reservas locales huérfanas; CitaLab `enforce` pausa la cola con `rubato-deferred (deadline_reserve)`.
+- Evidencia reproducible: `docs/integraciones.md`. Demo sintética (cuota 24): `reserva` → candidatura urgente terminada, fondo 22/24, 1 episodio de CitaLab pendiente; `radar` → fondo 24/24, candidatura en `capacity_exhausted`; `off` → 3 llamadas por la vía habitual y 0 decisiones nuevas en Rubato.
+- Supuesto o limitación: la competencia entre clientes se demuestra con carga sintética y proveedor simulado; las llamadas Codex del radar no están coordinadas; en CitaLab cada intento de inferencia es un trabajo de un paso.
+- Próxima tarea concreta: F7. En paralelo, cuando Andrés lo apruebe: `RADAR_RUBATO_MODE=shadow` en su radar con el servicio de Compose levantado.

@@ -501,15 +501,26 @@ def expire_and_detect(conn, t: int) -> dict:
     return {"expired": len(expired), "unknown": len(unknown)}
 
 
-def schedule_pass(conn, t: int | None = None) -> list[dict]:
-    """One admission round for all available clients. Caller commits."""
+def schedule_pass(conn, t: int | None = None, focus: tuple[str, str, str] | None = None) -> list[dict]:
+    """One admission round for all available clients. Caller commits.
+
+    ``focus=(client, job, step)``: for that client only the named step may receive a
+    permit in this round (a filtered claim must not occupy the client's slot with
+    another step it is not going to run now).
+    """
     t = now(conn) if t is None else t
     lock(conn)
     expire_and_detect(conn, t)
-    return _round(conn, t)
+    return _round(conn, t, focus=focus)
 
 
-def _round(conn, t: int, only: tuple[str, str] | None = None, apply: bool = True):
+def _round(
+    conn,
+    t: int,
+    only: tuple[str, str] | None = None,
+    apply: bool = True,
+    focus: tuple[str, str, str] | None = None,
+):
     """Build the snapshot, call ``decidir`` and (if ``apply``) persist grants and reasons.
 
     With ``only`` set and ``apply=False`` it returns the would-be decision for one step
@@ -549,6 +560,8 @@ def _round(conn, t: int, only: tuple[str, str] | None = None, apply: bool = True
         for s in srows:
             target = only is not None and (jid, s["step_id"]) == only
             if s["state"] != "ready" or (free.get(s["client_id"], 0) <= 0 and not target):
+                continue
+            if focus and s["client_id"] == focus[0] and (jid, s["step_id"]) != (focus[1], focus[2]):
                 continue
             step_rows[(jid, s["step_id"])] = s
             ready.append(
@@ -705,7 +718,7 @@ def claim(
     if slots is not None:
         conn.execute("UPDATE clients SET slots=%s WHERE id=%s", (slots, client["id"]))
     conn.execute("UPDATE clients SET available_until=%s WHERE id=%s", (t + EXECUTOR_TTL, client["id"]))
-    schedule_pass(conn, t)
+    schedule_pass(conn, t, focus=(client["id"], job, step) if job and step else None)
     a = conn.execute(
         "SELECT a.*, s.model, s.maximum, s.estimate FROM attempts a JOIN steps s ON s.job_id=a.job_id AND s.step_id=a.step_id "
         "WHERE a.client_id=%s AND a.state='granted' AND NOT a.delivered AND a.grant_expires_at > %s "
