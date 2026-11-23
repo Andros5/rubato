@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: scheduler, labels: {app: scheduler}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: scheduler}}
+  template:
+    metadata: {labels: {app: scheduler}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: scheduler
+          image: rubato
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "rubato.service.scheduler"]
+          envFrom: [{configMapRef: {name: rubato-config}}, {secretRef: {name: rubato-secrets}}]
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 250m, memory: 192Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true}

@@ -1,4 +1,5 @@
 """Smoke: the real CitaLab adapter (branch rubato-adapter) against the running Rubato service."""
+
 import json
 import os
 from dataclasses import replace
@@ -16,7 +17,9 @@ rubato.install()
 out = {}
 for mode in ("shadow", "enforce"):
     admin.post("/v1/admin/reset").raise_for_status()
-    admin.put("/v1/admin/resources", json=[{"id": "quota", "unit": "requests", "capacity": 3, "window": "total"}]).raise_for_status()
+    admin.put(
+        "/v1/admin/resources", json=[{"id": "quota", "unit": "requests", "capacity": 3, "window": "total"}]
+    ).raise_for_status()
     admin.put("/v1/admin/policy", json={"name": "reserva", "reserve": {"quota": 2}}).raise_for_status()
     os.environ["CITALAB_RUBATO_MODE"] = mode
     rubato.set_client(None)
@@ -28,7 +31,9 @@ for mode in ("shadow", "enforce"):
     for k in range(2):
         c = ChatClient(providers["google"], cfg, sleep=lambda _: None, gate=gate)
         c._http.close()
-        c._http = httpx.Client(transport=httpx.MockTransport(lambda r: (sent.append(1), httpx.Response(200, json=OK))[1]))
+        c._http = httpx.Client(
+            transport=httpx.MockTransport(lambda r, sent=sent: (sent.append(1), httpx.Response(200, json=OK))[1])
+        )
         try:
             with rubato.episode(f"google:H:fam-{k}:primary", "smoke"):
                 c._post("patient", {}, {}, "s", None, "v1")
@@ -36,6 +41,10 @@ for mode in ("shadow", "enforce"):
         except LLMError as e:
             res.append(f"blocked: {e}"[:80])
     usage = admin.get("/v1/usage").json()["resources"][0]
-    out[mode] = {"calls": res, "provider_calls": len(sent), "gate_pause": gate.pause_code,
-                 "rubato_used": usage["used"]}
+    out[mode] = {
+        "calls": res,
+        "provider_calls": len(sent),
+        "gate_pause": gate.pause_code,
+        "rubato_used": usage["used"],
+    }
 print(json.dumps(out, indent=1, ensure_ascii=False))

@@ -227,6 +227,17 @@ def _amounts(v, what) -> dict[str, int]:
     return dict(v)
 
 
+def _meta(meta) -> dict:
+    """Planning metadata only: short scalar values, no free text."""
+    if not isinstance(meta, dict):
+        return {}
+    return {
+        str(k)[:40]: v
+        for k, v in list(meta.items())[:10]
+        if isinstance(v, (int, float, bool)) or (isinstance(v, str) and len(v) <= 40)
+    }
+
+
 def register_job(conn, client: dict, body: dict) -> dict:
     t = now(conn)
     cjid = body.get("id")
@@ -250,8 +261,8 @@ def register_job(conn, client: dict, body: dict) -> dict:
     specs = load_resources(conn)
     warnings = []
     conn.execute(
-        "INSERT INTO jobs (id, client_id, client_job_id, cls, urgent, priority, arrival, deadline, created_at) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "INSERT INTO jobs (id, client_id, client_job_id, cls, urgent, priority, arrival, deadline, created_at, meta) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             jid,
             client["id"],
@@ -262,6 +273,7 @@ def register_job(conn, client: dict, body: dict) -> dict:
             t,
             body.get("deadline"),
             t,
+            json.dumps(_meta(body.get("meta"))),
         ),
     )
     for s in steps:
