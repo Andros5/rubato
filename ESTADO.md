@@ -143,7 +143,7 @@
 ### F7 · Cierre en clúster local (kind)
 - Estado: completa. Fecha: 2026-11-23.
 - Cambio entregado: `kind` 0.33.0 instalado con scoop (con permiso de Andrés); `scripts/ops/k8s_up.ps1` se detiene ante cualquier fallo de un comando nativo y carga la imagen como archivo de una sola plataforma (`kind load docker-image` falla con el almacén containerd de Docker: «content digest … not found»); `ha_drill.py` lee los tokens de `RUBATO_TEST_*_TOKEN`.
-- Incidencia de entorno: Docker Desktop no arrancaba (sockets `dockerInference` y `userAnalyticsOtlpHttp.sock` corruptos en `%LOCALAPPDATA%\Dockerun`, imposibles de borrar). Se renombró la carpeta a `run.stale-20261123` y Docker la recreó; no se usó «Reset to factory defaults».
+- Incidencia de entorno: Docker Desktop no arrancaba (sockets `dockerInference` y `userAnalyticsOtlpHttp.sock` corruptos en la carpeta `run` de Docker bajo `%LOCALAPPDATA%`, imposibles de borrar). Se renombró la carpeta a `run.stale-20261123` y Docker la recreó; no se usó «Reset to factory defaults».
 - Pruebas ejecutadas:
   - `powershell -File scripts/ops/k8s_up.ps1` → clúster `kind-rubato`, PostgreSQL con volumen persistente, API 2 réplicas, planificador y proveedor simulado en `Running`; `/readyz` en `127.0.0.1:18000` con esquema 0002. Cada réplica de la API se reinició una vez al arrancar antes que PostgreSQL (la sonda la recupera).
   - Misma suite de comportamiento que en Compose: `RUBATO_TEST_API=http://127.0.0.1:18000 RUBATO_TEST_PROVIDER=http://127.0.0.1:18100 RUBATO_TEST_*_TOKEN=<secrets.env> RUBATO_TEST_DSN=<port-forward> pytest -q -m postgres` → **16 passed, 1 skipped** (la omitida controla Docker Compose).
