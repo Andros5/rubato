@@ -186,7 +186,6 @@ tests/           behaviour tests (simulator, service on real PostgreSQL, adapter
 | [Integrations](docs/integraciones.md) | Adapters for two real applications, rollout and rollback |
 | [Design decisions](docs/decisiones.md) · [ADRs](docs/adr/) | Strict caps vs estimates, online policy vs optimum, uncertain attempts |
 | [Evaluation](docs/evaluacion.md) | Scenarios, real-history verdict, when the reserve did worse |
-| [Development notes](docs/desarrollo/) | Original plan and the phase-by-phase evidence log |
 | [Changelog](CHANGELOG.md) | Release notes |
 
 ## Development
@@ -206,7 +205,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.
 - Several providers with their own limits per client.
 - Rolling-horizon planning once enough prospective days with observed arrivals exist.
 - Model selection by quality per class, which needs quality data, not only price.
-- A pilot with an external maintainer ([protocol](docs/piloto.md)).
+- A usability pilot with the maintainer of another AI automation.
 
 ## License
 

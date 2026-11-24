@@ -59,14 +59,6 @@ Solo viajan metadatos de planificación: nunca prompts, ofertas, transcripciones
   tras borrar una reserva rechazada (radar); ids con `:` y `/` (servicio); una petición
   filtrada por paso podía conceder otro paso del mismo cliente y ocupar su ranura.
 
-## Pendiente de evidencia
-
-- `shadow` durante varias jornadas con tráfico real: latencia añadida, coincidencias y
-  divergencias. Requiere que Andrés active el modo en su radar y en una campaña.
-- Activación progresiva (`enforce` en un lote de prueba, después una clase reversible
-  del radar, después ambos clientes). Requiere tráfico real y su aprobación.
-- Una jornada real en la que ambos clientes compitan por el mismo límite.
-
 ## Volver atrás
 
 `RADAR_RUBATO_MODE=off` / `CITALAB_RUBATO_MODE=off` (o el runner habitual) devuelve

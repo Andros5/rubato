@@ -2,7 +2,7 @@
 
 Parámetros congelados antes de evaluar: `examples/policies.json` (sintético) y
 `examples/policies-radar.json` (privado), ambos `frozen_at: 2026-11-23`; umbrales
-del piloto en `config/piloto.json` (**propuesta pendiente de acuerdo con Andrés**:
+del piloto en `config/piloto.json` (**umbrales provisionales**:
 +1 urgencia a tiempo y como máximo 30 min más de espera p95 del fondo).
 
 ## 1. Jornadas sintéticas (`examples/demo.jsonl`, semilla 7, 120 trabajos)

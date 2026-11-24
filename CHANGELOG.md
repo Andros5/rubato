@@ -9,7 +9,6 @@
 - Compose services restart with Docker (`restart: unless-stopped`).
 - Panel: accepts the admin token from the URL fragment; uncertain amounts are counted in
   the same window as the used amount.
-- Development notes moved to `docs/desarrollo/`.
 
 ## 1.1.0 — 2026-11-23 (local release, not published)
 
@@ -96,4 +95,4 @@
 - swiss-job-radar `rubato-adapter`, citalab `rubato-adapter`.
 
 ### Known limits
-- See `docs/release-v1.0.0.md`.
+- Evaluated on synthetic scenarios and on 13 days of real history; see `docs/evaluacion.md`.

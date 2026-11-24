@@ -36,5 +36,10 @@ dist/
 # local development tool settings
 .claude/
 
-# private planning documents (kept only locally)
-docs/desarrollo/PLAN_*.md
+# daily work stays local: plans, phase log, internal reports, agent instructions
+docs/desarrollo/
+CLAUDE.md
+AGENTS.md
+.codex/
+docs/release-v1.0.0.md
+docs/piloto.md

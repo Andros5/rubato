@@ -1,7 +1,7 @@
 {
   "version": "rubato.pilot/v1",
   "frozen_at": "2026-11-23",
-  "status": "propuesta pendiente de acuerdo con Andrés",
+  "status": "draft thresholds used by rubato evaluate",
   "min_urgent_gain": 1,
   "max_background_p95_extra_s": 1800,
   "meaning": "La reserva solo pasa a ser la política por defecto si en el bloque de prueba termina a tiempo al menos 1 urgencia más que la referencia Radar y la espera p95 del fondo no crece más de 30 min. Si pierde o empata, se distribuye la referencia y el simulador sigue siendo el producto."
