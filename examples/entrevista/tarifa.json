@@ -1,0 +1,6 @@
+{
+  "schema": "rubato.tariff/v1",
+  "version": "synthetic-eur-1",
+  "currency": "EUR",
+  "rates": [{"model": "sim-flash", "input_per_million": "1.25", "output_per_million": "5"}]
+}

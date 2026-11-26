@@ -13,13 +13,24 @@ pip install -e ".[dev]"
 pytest -q                       # simulator, CLI, report, SDK: no network, no keys
 ```
 
-Service tests need a running stack in test mode:
+Run service and migration tests on the separate Compose trial project.
 
 ```bash
-RUBATO_TEST_CLOCK=1 docker compose --profile demo up -d --build
-RUBATO_TEST_API=http://127.0.0.1:8000 \
-RUBATO_TEST_DSN=postgresql://rubato:rubato-local-only@127.0.0.1:55432/rubato \
-pytest -q -m postgres
+(
+  set -e
+  export RUBATO_ENVIRONMENT=entrevista-ensayo
+  export RUBATO_API_PORT=18800 RUBATO_API2_PORT=18801 RUBATO_PROVIDER_PORT=18810 RUBATO_DB_PORT=56532
+  compose=(docker compose --env-file config/entrevista-compose.example.vars -p rubato-entrevista-ensayo --profile ha --profile demo)
+  "${compose[@]}" build api
+  trap '"${compose[@]}" stop' EXIT
+  "${compose[@]}" up -d --wait --wait-timeout 90
+  RUBATO_TEST_API=http://127.0.0.1:18800 \
+  RUBATO_TEST_PROVIDER=http://127.0.0.1:18810 \
+  RUBATO_TEST_DSN=postgresql://rubato:rubato-demo-only@127.0.0.1:56532/rubato \
+  RUBATO_TEST_COMPOSE=1 RUBATO_TEST_ADMIN_TOKEN=demo-admin-local \
+  RUBATO_TEST_RADAR_TOKEN=demo-radar-local RUBATO_TEST_CITALAB_TOKEN=demo-citalab-local \
+  python -m pytest -q -m postgres
+)
 ```
 
 ## Ground rules

@@ -34,6 +34,8 @@ class ResourceSpec:
     scope: dict[str, str] = field(default_factory=dict)
     strict: bool = True  # strict caps reserve the enforceable maximum
     version: int = 1
+    calendar_period: str = "day"
+    alert_at: int | None = None  # percentage of capacity used
 
     def __post_init__(self) -> None:
         if self.window not in WINDOW_KINDS:
@@ -53,8 +55,14 @@ class ResourceSpec:
         for k, v in self.scope.items():
             if not isinstance(v, str) or not v:
                 raise ValueError(f"resource {self.id}: scope {k!r} must be a non-empty string")
+        if self.calendar_period not in ("day", "month") or (
+            self.calendar_period == "month" and (self.window != "calendar" or not self.reset_tz)
+        ):
+            raise ValueError(f"resource {self.id}: monthly calendar requires a reset timezone")
+        if self.alert_at is not None and (type(self.alert_at) is not int or not 1 <= self.alert_at <= 100):
+            raise ValueError(f"resource {self.id}: alert_at must be a percentage between 1 and 100")
 
-    def applies(self, client: str, model: str | None, provider: str | None = None) -> bool:
+    def applies(self, client: str | None, model: str | None, provider: str | None = None) -> bool:
         if "client" in self.scope and self.scope["client"] != client:
             return False
         if "model" in self.scope and self.scope["model"] != model:
@@ -76,6 +84,8 @@ class ResourceSpec:
             tz = ZoneInfo(self.reset_tz)
             local = datetime.fromtimestamp(t, UTC).astimezone(tz)
             midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            if self.calendar_period == "month":
+                midnight = midnight.replace(day=1)
             return int(midnight.timestamp())
         assert self.length
         return self.offset + ((t - self.offset) // self.length) * self.length
@@ -84,6 +94,9 @@ class ResourceSpec:
         if self.reset_tz:
             tz = ZoneInfo(self.reset_tz)
             local = datetime.fromtimestamp(t, UTC).astimezone(tz)
+            if self.calendar_period == "month":
+                year, month = divmod(local.month, 12)
+                return int(datetime(local.year + year, month + 1, 1, tzinfo=tz).timestamp())
             nxt = (local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).replace(
                 tzinfo=None
             )
@@ -206,7 +219,11 @@ class Ledger:
                 continue
             if usage is not None and spec.unit in usage:
                 e.amount = int(usage[spec.unit])
-            e.state = state
+            e.state = (
+                "unknown"
+                if usage is not None and spec.unit == "cost_micro" and spec.unit not in usage
+                else state
+            )
 
     def release(self, attempt_id: str) -> None:
         for e in self._by_attempt.get(attempt_id, []):

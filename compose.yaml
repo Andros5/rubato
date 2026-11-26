@@ -1,7 +1,8 @@
-# Local environment with API, planner, PostgreSQL and a simulated provider.
-# Start an isolated demo on localhost.
-# docker compose --env-file config/demo-compose.example.vars -p rubato-demo --profile ha build api
-# docker compose --env-file config/demo-compose.example.vars -p rubato-demo --profile ha up -d --wait
+# Local environment: API + planner + PostgreSQL. No real keys.
+# The simulated provider lives in the "demo" profile, used only by the separate
+# interview/trial projects and by isolated demos such as:
+# docker compose --env-file config/demo-compose.example.vars -p rubato-demo --profile ha --profile demo build api
+# docker compose --env-file config/demo-compose.example.vars -p rubato-demo --profile ha --profile demo up -d --wait
 name: rubato
 # Sized for a PC that runs this stack all day (docs/operacion.md, "Recursos").
 x-logging: &logging  # rotated, compressed logs: the default json-file driver grows without bound
@@ -86,9 +87,11 @@ services:
       api: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/readyz')"]
-      interval: 3s
+      start_period: 60s
+      start_interval: 1s
+      interval: 30s
       timeout: 3s
-      retries: 20
+      retries: 3
   scheduler:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     image: rubato:${RUBATO_VERSION:-1.1.1}
@@ -98,7 +101,7 @@ services:
     logging: *logging
     depends_on:
       api: {condition: service_healthy}
-  provider:  # simulated provider, only for tests and demos: docker compose --profile demo up -d
+  provider:  # simulated provider: only the separate interview/trial projects enable --profile demo
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     profiles: ["demo"]
     image: rubato:${RUBATO_VERSION:-1.1.1}
@@ -114,9 +117,11 @@ services:
       api: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8100/healthz')"]
-      interval: 3s
+      start_period: 60s
+      start_interval: 1s
+      interval: 30s
       timeout: 3s
-      retries: 20
+      retries: 3
 volumes:
   dbdata:
   providerdata:

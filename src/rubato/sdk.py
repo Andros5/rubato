@@ -11,6 +11,7 @@ Modes (per client application):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -74,7 +75,13 @@ class RubatoClient:
 
     # permits
     def claim(
-        self, job: str | None = None, step: str | None = None, slots: int | None = None, shadow: bool = False
+        self,
+        job: str | None = None,
+        step: str | None = None,
+        slots: int | None = None,
+        shadow: bool = False,
+        *,
+        key: str | None = None,
     ) -> dict:
         body: dict = {"shadow": shadow}
         if job:
@@ -83,7 +90,7 @@ class RubatoClient:
             body["step"] = step
         if slots is not None:
             body["slots"] = slots
-        return self._req("POST", "/v1/claims", body)
+        return self._req("POST", "/v1/claims", body, {"Idempotency-Key": key} if key is not None else None)
 
     def start(self, attempt: str) -> dict:
         try:
@@ -272,3 +279,155 @@ class Gate:
             raise
         self.client.finish(aid, out.status, out.usage, out.receipt, out.retry_after)
         return GateResult(True, "enforce", value, attempt=aid, waited_s=waited)
+
+
+class AsyncGate:
+    """Async equivalent of Gate. The provider callback receives its stable attempt key."""
+
+    def __init__(self, client: httpx.AsyncClient | None, mode="off", wait_timeout=30.0, mode_ttl=30.0):
+        if mode not in (*MODES, "auto"):
+            raise ValueError(f"mode must be one of {MODES} or 'auto'")
+        self.client, self.requested, self.wait_timeout, self.mode_ttl = client, mode, wait_timeout, mode_ttl
+        self.mode = "off" if mode == "auto" else mode
+        self._mode_checked = float("-inf")
+        self._mode_lock = asyncio.Lock()
+        self.pending: dict[str, Outcome | None] = {}
+        self.shadow_log: list[dict] = []
+
+    async def _request(self, method, path, body=None, headers=None):
+        response = await self.client.request(
+            method,
+            path,
+            json=body,
+            headers={"X-Correlation-Id": str(uuid.uuid4()), **(headers or {})},
+        )
+        data = response.json() if response.content else {}
+        if response.status_code >= 400:
+            raise RubatoError(response.status_code, data if isinstance(data, dict) else {"error": str(data)})
+        return data
+
+    async def current_mode(self):
+        if self.requested == "auto" and self.client is not None:
+            async with self._mode_lock:
+                t = time.monotonic()
+                if t - self._mode_checked >= self.mode_ttl:
+                    try:
+                        m = (await self._request("GET", "/v1/mode"))["mode"]
+                        if m in MODES:
+                            self.mode = m
+                    except (RubatoError, httpx.HTTPError, ValueError, KeyError) as exc:
+                        log.warning("rubato: mode unavailable, keeping %s: %s", self.mode, exc)
+                    self._mode_checked = t
+        return self.mode
+
+    async def register(self, job: dict):
+        mode = await self.current_mode()
+        if mode == "off" or self.client is None:
+            return
+        try:
+            await self._request("POST", "/v1/jobs", job, {"Idempotency-Key": f"job:{job['id']}"})
+        except RubatoError as exc:
+            if exc.status == 409 and exc.body.get("error") == "exists":
+                return
+            if mode == "enforce":
+                raise RubatoUnavailable(str(exc)) from exc
+            log.warning("rubato shadow: register failed: %s", exc)
+        except (httpx.HTTPError, ValueError) as exc:
+            if mode == "enforce":
+                raise RubatoUnavailable(str(exc)) from exc
+            log.warning("rubato shadow: register failed: %s", exc)
+
+    async def finish(self, attempt: str, outcome: Outcome | None = None) -> dict:
+        """Retry settlement with the original attempt key and outcome after a lost response."""
+        out = outcome if outcome is not None else self.pending.get(attempt)
+        if out is None:
+            raise ValueError("an attempt without a known outcome needs receipt reconciliation")
+        body = {"status": out.status, "usage": out.usage, "receipt": out.receipt}
+        if out.retry_after is not None:
+            body["retry_after"] = out.retry_after
+        self.pending[attempt] = out
+        result = await self._request("POST", f"/v1/attempts/{attempt}/finish", body)
+        self.pending.pop(attempt, None)
+        return result
+
+    async def reconcile(self, attempt: str, *, consumed: bool, outcome: Outcome | None = None, evidence=None):
+        result = await self._request(
+            "POST",
+            f"/v1/attempts/{attempt}/reconcile",
+            {
+                "consumed": consumed,
+                "usage": outcome.usage if outcome else None,
+                "receipt": outcome.receipt if outcome else None,
+                "status": outcome.status if outcome else "ok",
+                "evidence": evidence,
+            },
+        )
+        self.pending.pop(attempt, None)
+        return result
+
+    async def run(self, job: str, step: str, call) -> GateResult:
+        mode = await self.current_mode()
+        if mode == "off" or self.client is None:
+            value, _ = await call(None)
+            return GateResult(True, "off", value)
+        if mode == "shadow":
+            would = None
+            started = time.monotonic()
+            try:
+                would = (
+                    await self._request("POST", "/v1/claims", {"job": job, "step": step, "shadow": True})
+                ).get("shadow")
+            except (RubatoError, httpx.HTTPError, ValueError) as exc:
+                log.warning("rubato shadow: claim failed: %s", exc)
+            latency = time.monotonic() - started
+            value, out = await call(None)
+            try:
+                await self._request(
+                    "POST",
+                    "/v1/observations",
+                    {
+                        "job": job,
+                        "step": step,
+                        "usage": out.usage,
+                        "status": out.status,
+                        "receipt": out.receipt,
+                    },
+                )
+            except (RubatoError, httpx.HTTPError, ValueError) as exc:
+                log.warning("rubato shadow: observe failed: %s", exc)
+            self.shadow_log.append({"job": job, "step": step, "would": would, "latency_s": round(latency, 4)})
+            return GateResult(True, mode, value, shadow=would)
+
+        start = time.monotonic()
+        deadline = start + self.wait_timeout
+        while True:
+            try:
+                response = await self._request("POST", "/v1/claims", {"job": job, "step": step})
+            except (RubatoError, httpx.HTTPError, ValueError) as exc:
+                raise RubatoUnavailable(str(exc)) from exc
+            if permit := response.get("permit"):
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                reason = (response.get("step") or {}).get("last_reason")
+                return GateResult(
+                    False, mode, waited_s=time.monotonic() - start, reason=reason or "no permit"
+                )
+            await asyncio.sleep(min(float(response.get("retry_after") or 1), remaining))
+        aid = permit["attempt"]
+        waited = time.monotonic() - start
+        self.pending[aid] = None  # a lost start response must not trigger another provider call
+        try:
+            await self._request("POST", f"/v1/attempts/{aid}/start")
+        except RubatoError as exc:
+            if exc.status == 409 and exc.body.get("error") == "permit_expired":
+                self.pending.pop(aid, None)
+                return GateResult(False, mode, attempt=aid, waited_s=waited, reason="permit_expired")
+            raise RubatoUnavailable(f"start not confirmed: {exc}") from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise RubatoUnavailable(f"start not confirmed: {exc}") from exc
+        # Cancellation leaves the key available for receipt lookup. A completed
+        # callback leaves its exact outcome available for idempotent settlement.
+        value, out = await call(aid)
+        await self.finish(aid, out)
+        return GateResult(True, mode, value, attempt=aid, waited_s=waited)

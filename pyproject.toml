@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rubato"
-version = "1.1.1"
+version = "1.2.0"
 description = "Shared-budget scheduler for AI workloads: simulate, compare and explain admission decisions."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,7 +26,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "rubato.service.migrations" = ["*.sql"]
-"rubato.data" = ["*.jsonl", "*.json"]
+"rubato.data" = ["*.jsonl", "*.json", "workbench/*.json", "workbench/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

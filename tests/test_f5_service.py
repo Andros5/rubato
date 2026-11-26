@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
-from service_helpers import PROVIDER, advance, client, job, needs_service, ok, reset
+from service_helpers import PROVIDER, advance, checked_compose_stack, client, job, needs_service, ok, reset
 
 pytestmark = [pytest.mark.postgres, needs_service]
 
@@ -214,12 +213,13 @@ def test_reserve_policy_runs_in_the_service_with_the_same_core():
 
 @pytest.mark.skipif(os.environ.get("RUBATO_TEST_COMPOSE") != "1", reason="needs docker compose control")
 def test_restart_preserves_jobs_and_audit():
+    stack, _ = checked_compose_stack()
     reset(TEN)
     with client("radar") as c:
         ok(c.post("/v1/jobs", json=job("survivor")), 201)
         p = ok(c.post("/v1/claims", json={}))["permit"]
-        ok(c.post(f"/v1/attempts/{p['attempt']}/start"))
-    subprocess.run(["docker", "compose", "restart", "api", "scheduler"], check=True, capture_output=True)
+        started = ok(c.post(f"/v1/attempts/{p['attempt']}/start"))
+    stack.compose("restart", "api", "scheduler")
     for _ in range(60):
         try:
             if httpx.get(f"{os.environ['RUBATO_TEST_API']}/readyz", timeout=2).status_code == 200:
@@ -229,10 +229,73 @@ def test_restart_preserves_jobs_and_audit():
         time.sleep(1)
     with client("radar") as c:
         j = ok(c.get("/v1/jobs/survivor"))
-        assert j["attempts"][0]["state"] == "started"
+        assert len(j["attempts"]) == 1
+        attempt = j["attempts"][0]
+        assert (attempt["id"], attempt["started_at"]) == (p["attempt"], started["started_at"])
+        # A slow restart can pass the demo timeout. The persisted reservation is
+        # still charged and the original executor can settle the same attempt.
+        assert attempt["state"] in {"started", "unknown"}
+        assert ok(c.get("/v1/usage"))["resources"][0]["used"] == 1
         ok(c.post(f"/v1/attempts/{p['attempt']}/finish", json={"status": "ok", "usage": {"requests": 1}}))
         assert ok(c.get("/v1/jobs/survivor"))["state"] == "done"
+        assert ok(c.get("/v1/usage"))["resources"][0]["used"] == 1
         assert [d["action"] for d in ok(c.get("/v1/decisions", params={"job": "survivor"}))] == ["authorize"]
+
+
+def test_reserve_keeps_the_last_request_for_a_later_urgent_job():
+    reset([{"id": "rpd", "unit": "requests", "capacity": 3}], {"name": "reserva", "reserve": {"rpd": 2}})
+    with client("radar") as c:
+        for name in ("urgent", "bg1", "bg2"):
+            ok(c.post("/v1/jobs", json=job(name, urgent=name == "urgent")), 201)
+        first = ok(c.post("/v1/claims", json={"slots": 4}))["permit"]
+        second = ok(c.post("/v1/claims", json={}))["permit"]
+        assert {first["job"], second["job"]} == {"radar:urgent", "radar:bg1"}
+        assert ok(c.post("/v1/claims", json={}))["permit"] is None
+        blocked = ok(c.get("/v1/decisions", params={"job": "bg2"}))[-1]
+        assert blocked["reason"] == "deadline_reserve" and blocked["value"]["blocks"][0]["held"] == 1
+        ok(c.post("/v1/jobs", json=job("urgent2", urgent=True)), 201)
+        assert ok(c.post("/v1/claims", json={}))["permit"]["job"] == "radar:urgent2"
+
+
+@pytest.mark.parametrize("dimension", ["model", "client", "global"])
+def test_reserve_only_holds_known_followup_demand_on_applicable_resources(dimension):
+    if dimension == "global":
+        resources = [{"id": "q", "unit": "requests", "capacity": 2}]
+    else:
+        resources = [
+            {
+                "id": value,
+                "unit": "requests",
+                "capacity": 2 if value in ("a", "radar") else 1,
+                "scope": {dimension: value},
+            }
+            for value in (("a", "b") if dimension == "model" else ("radar", "citalab"))
+        ]
+    reset(resources, {"name": "reserva", "reserve": {"*": 0}})
+    with client("radar") as urgent, client("citalab") as bg:
+        ok(
+            urgent.post(
+                "/v1/jobs",
+                json=job(
+                    "u",
+                    urgent=True,
+                    steps=[
+                        {"id": "a", "model": "a", "estimate": {"requests": 1}},
+                        {"id": "b", "model": "a", "estimate": {"requests": 1}, "depends_on": ["a"]},
+                    ],
+                ),
+            ),
+            201,
+        )
+        assert ok(urgent.post("/v1/claims", json={}))["permit"]
+        ok(
+            bg.post(
+                "/v1/jobs", json=job("b", steps=[{"id": "s", "model": "b", "estimate": {"requests": 1}}])
+            ),
+            201,
+        )
+        permit = ok(bg.post("/v1/claims", json={}))["permit"]
+        assert (permit is None) == (dimension == "global")
 
 
 def test_client_job_ids_may_contain_colons_and_slashes():

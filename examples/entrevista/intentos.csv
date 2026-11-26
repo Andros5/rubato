@@ -1,0 +1,4 @@
+cliente,trabajo,paso,intento,llegada,inicio,fin,modelo,estado,entrada,salida,dependencias
+radar,jornada-a,cv,a1,2026-11-24T09:00:00,2026-11-24T09:00:02,2026-11-24T09:00:05,sim-flash,ok,2000,600,
+radar,jornada-a,carta,a2,2026-11-24T09:00:00,2026-11-24T09:00:06,2026-11-24T09:00:08,sim-flash,ok,1200,350,cv
+citalab,jornada-b,resumen,b1,,2026-11-24T09:00:02,2026-11-24T09:00:05,sim-flash,ok,1500,400,

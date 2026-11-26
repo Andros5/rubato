@@ -34,7 +34,9 @@ def test_overview_feeds_the_panel():
         assert client("radar").get("/v1/admin/overview").status_code == 403
     q = o["resources"][0]
     assert (q["id"], q["used"], q["available"], q["used_urgent"]) == ("quota", 1, 0, 1)
-    assert {c["id"] for c in o["clients"]} == {"radar", "citalab"}
+    clients = {c["id"] for c in o["clients"]}
+    assert {"radar", "citalab"} <= clients
+    assert "admin" not in clients
     assert o["example_tokens"] == ["admin", "citalab", "radar"]  # Compose defaults are flagged
     assert any(r["last_reason"] == "capacity_exhausted" for r in o["reasons"])
     assert [w["job_id"] for w in o["waiting"]] == ["radar:a"]

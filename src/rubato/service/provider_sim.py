@@ -38,7 +38,7 @@ def _db() -> sqlite3.Connection:
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True}
+    return {"ok": True, "provider": "rubato-simulated"}
 
 
 @app.post("/v1/control")

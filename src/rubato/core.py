@@ -7,7 +7,6 @@ never sees outcomes or future arrivals.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -24,6 +23,14 @@ LIMIT_REASON = {
 
 
 @dataclass(frozen=True)
+class StepDemand:
+    step_id: str
+    model: str | None
+    need: dict[str, int]
+    provider: str | None = None
+
+
+@dataclass(frozen=True)
 class Demand:
     """Known unfinished work of one job (used by reserve policies)."""
 
@@ -32,35 +39,20 @@ class Demand:
     deadline: int | None
     remaining_need: dict[str, int]
     oldest_wait_since: int | None = None
-    remaining_duration: int = 0  # estimated time still needed (sequential), for deadline checks
-    # remaining need per resource id, counting each step only on the resources that apply
-    # to it (its provider, model and client). None = fall back to remaining_need on every resource.
-    by_resource: dict[str, int] | None = None
+    remaining_duration: int = 0
+    client: str | None = None
+    steps: tuple[StepDemand, ...] = ()
 
-    def need_on(self, spec: ResourceSpec) -> int:
-        if self.by_resource is not None:
-            return self.by_resource.get(spec.id, 0)
-        return spec.need_of(self.remaining_need)
-
-
-def need_by_resource(
-    specs: Sequence[ResourceSpec],
-    client: str,
-    steps: Sequence[tuple[str | None, str | None, dict[str, int]]],
-) -> dict[str, int]:
-    """Sum the admission amounts of ``steps`` ((model, provider, amount) each) per applicable resource."""
-    out: dict[str, int] = {}
-    for model, provider, amount in steps:
-        for spec in specs:
-            if not spec.applies(client, model, provider):
-                continue
-            if spec.window == "concurrency":
-                out[spec.id] = 1  # one slot per job, as with remaining_need
-                continue
-            n = spec.need_of(amount)
-            if n:
-                out[spec.id] = out.get(spec.id, 0) + n
-    return out
+    def pending_for(self, spec: ResourceSpec, admitted: set[tuple[str, str]]) -> int:
+        if not self.steps:
+            # Public callers can still supply a job-level aggregate for a shared limit.
+            return spec.need_of(self.remaining_need) if not spec.scope else 0
+        return sum(
+            spec.need_of(step.need)
+            for step in self.steps
+            if (self.job_id, step.step_id) not in admitted
+            and spec.applies(self.client, step.model, step.provider)
+        )
 
 
 def pause_key(model: str | None, provider: str | None) -> tuple[str, str]:
@@ -80,6 +72,11 @@ class Capacity:
 
     ledger: Ledger
     pauses: dict[tuple[str, str], int] = field(default_factory=dict)
+    executors: dict[str, int] | None = None
+    turn: tuple[str, int] | None = None
+    turn_blocked: dict[str, ReadyItem] = field(default_factory=dict)
+    turn_deliveries: int = 0
+    turn_closed: set[tuple[str, str]] = field(default_factory=set)
 
     @property
     def specs(self) -> list[ResourceSpec]:
@@ -122,7 +119,7 @@ class Policy(Protocol):
         spec: ResourceSpec,
         capacity: Capacity,
         demand: Sequence[Demand],
-        round_alloc: dict[tuple[str, bool], int],
+        admitted: set[tuple[str, str]],
     ) -> tuple[int, int | None]:
         """Amount of ``spec`` withheld from ``item`` and the instant that hold ends (or None)."""
         ...
@@ -130,6 +127,10 @@ class Policy(Protocol):
 
 def _impossible(now: int, item: ReadyItem) -> bool:
     return item.deadline is not None and now + item.remaining_duration > item.deadline
+
+
+def urgent_for(now: int, item: ReadyItem, policy: Policy) -> bool:
+    return item.urgent and not (_impossible(now, item) and policy.on_impossible(item) == "background")
 
 
 def decidir(
@@ -150,29 +151,60 @@ def decidir(
     decisions: list[Decision] = []
     # tentative bookings of this round live in an overlay so availability and
     # reconsideration times already account for them
-    capacity = Capacity(capacity.ledger.overlay(), dict(capacity.pauses))
-    round_alloc: dict[tuple[str, bool], int] = defaultdict(int)  # (resource, urgent) -> allocated
+    capacity = Capacity(capacity.ledger.overlay(), capacity.pauses, capacity.executors, capacity.turn)
+    free = None if capacity.executors is None else dict(capacity.executors)
+    admitted: set[tuple[str, str]] = set()
     overtaken: list[str] = []
     pol = policy.label
 
-    for item in policy.order(now, ready):
+    ordered = (
+        policy.round_order(now, ready, capacity)
+        if hasattr(policy, "round_order")
+        else policy.order(now, ready)
+    )
+    fair_spec = capacity.ledger.specs.get(getattr(policy, "resource", None))
+    for item in ordered:
         base = dict(t=now, job_id=item.job_id, step_id=item.step_id, attempt=item.attempt, policy=pol)
-        urgent = item.urgent
-        if _impossible(now, item):
-            mode = policy.on_impossible(item)
-            if mode == "drop":
-                decisions.append(
-                    Decision(
-                        **base,
-                        action=Action.CLOSE,
-                        reason=Reason.DEADLINE_IMPOSSIBLE,
-                        detail=f"needs {item.remaining_duration} more time units, deadline {item.deadline} < {now + item.remaining_duration}",
-                        value={"deadline": item.deadline, "earliest_finish": now + item.remaining_duration},
-                    )
+        mode = policy.on_impossible(item) if _impossible(now, item) else "run"
+        urgent = item.urgent and mode != "background"
+        fair_item = (
+            not urgent
+            and mode != "drop"
+            and fair_spec is not None
+            and fair_spec.applies(item.client, item.model, item.provider)
+            and fair_spec.need_of(item.need)
+        )
+        if fair_item and (front := capacity.turn_blocked.get(item.client)):
+            earlier = next(
+                d for d in reversed(decisions) if (d.job_id, d.step_id) == (front.job_id, front.step_id)
+            )
+            decisions.append(
+                Decision(
+                    **base,
+                    action=Action.DEFER,
+                    reason=Reason.FAIR_TURN,
+                    resource=earlier.resource,
+                    detail=f"{item.client} waits for {front.job_id}/{front.step_id} ({earlier.reason})",
+                    value=earlier.value,
+                    next_t=earlier.next_t,
                 )
-                continue
-            if mode == "background":
-                urgent = False
+            )
+            continue
+        if mode == "drop":
+            decisions.append(
+                Decision(
+                    **base,
+                    action=Action.CLOSE,
+                    reason=Reason.DEADLINE_IMPOSSIBLE,
+                    detail=f"estimated critical path {item.remaining_duration}; deadline {item.deadline} < {now + item.remaining_duration} (configured drop rule)",
+                    value={
+                        "deadline": item.deadline,
+                        "earliest_finish": now + item.remaining_duration,
+                        "basis": "estimated_critical_path",
+                    },
+                )
+            )
+            continue
 
         pause_end = capacity.paused_until(item, now)
         if pause_end is not None:
@@ -192,6 +224,9 @@ def decidir(
         never: tuple[ResourceSpec, int] | None = None
         blocks: list[dict] = []
         for spec in capacity.applicable(item):
+            if spec.unit == "cost_micro" and "cost_micro" not in item.need:
+                blocks.append(dict(resource=spec.id, reason=Reason.USAGE_UNKNOWN, next_t=None))
+                continue
             need = spec.need_of(item.need)
             if need == 0:
                 continue
@@ -201,7 +236,7 @@ def decidir(
             avail = capacity.ledger.available(spec.id, now)
             held, hold_end = (0, None)
             if not urgent:
-                held, hold_end = policy.held(now, item, spec, capacity, demand, round_alloc)
+                held, hold_end = policy.held(now, item, spec, capacity, demand, admitted)
             if need > avail:
                 nxt = capacity.ledger.next_available(spec.id, now, need)
                 blocks.append(
@@ -232,6 +267,8 @@ def decidir(
 
         if never is not None:
             spec, need = never
+            if fair_item:
+                capacity.turn_closed.add((item.job_id, item.step_id))
             decisions.append(
                 Decision(
                     **base,
@@ -260,6 +297,8 @@ def decidir(
                     parts.append(
                         f"{b['resource']}: needs {b['need']}, {b['available']} available but {b['held']} held for urgent work"
                     )
+                elif b["reason"] == Reason.USAGE_UNKNOWN:
+                    parts.append(f"{b['resource']}: admission cost is unknown")
                 else:
                     tail = " (no reset before horizon)" if b.get("no_reset") else ""
                     parts.append(f"{b['resource']}: needs {b['need']}, {b['available']} available{tail}")
@@ -277,24 +316,52 @@ def decidir(
             overtaken.append(item.job_id)
             continue
 
+        if free is not None and free.get(item.client, 0) == 0:
+            decisions.append(
+                Decision(
+                    **base,
+                    action=Action.DEFER,
+                    reason=Reason.CLIENT_UNAVAILABLE,
+                    detail=f"client {item.client} has no executor available",
+                )
+            )
+            continue
+
         for spec in capacity.applicable(item):
             need = spec.need_of(item.need)
             capacity.ledger.book(
                 spec.id, now, need, f"round:{item.job_id}/{item.step_id}", urgent, item.client
             )
-            round_alloc[(spec.id, urgent)] += need
+        admitted.add((item.job_id, item.step_id))
+        if free is not None:
+            free[item.client] -= 1
         reason = policy.authorize_reason(item) if urgent == item.urgent else Reason.FIFO
         detail = ""
         if overtaken:
             reason = Reason.BACKFILL
             detail = "starts ahead of " + ", ".join(dict.fromkeys(overtaken)) + " which do not fit now"
+        value = {"need": dict(item.need)}
+        if fair_item:
+            weight = policy.weights.get(item.client, 1)
+            previous, count = capacity.turn or ("", 0)
+            position = count + 1 if previous == item.client and count < weight else 1
+            capacity.turn = (item.client, position)
+            capacity.turn_deliveries += 1
+            reason = Reason.FAIR_TURN
+            detail = f"{item.client} receives a turn on {fair_spec.id} ({position}/{weight})"
+            value["turn"] = {
+                "client": item.client,
+                "position": position,
+                "weight": weight,
+                "resource": fair_spec.id,
+            }
         decisions.append(
             Decision(
                 **base,
                 action=Action.AUTHORIZE,
                 reason=reason,
                 detail=detail,
-                value={"need": dict(item.need)},
+                value=value,
             )
         )
     return decisions

@@ -102,6 +102,8 @@ def _resource(d: dict, line: int) -> ResourceSpec:
             scope=d.get("scope") or {},
             strict=d.get("strict", True),
             version=d.get("version", 1),
+            calendar_period=d.get("calendar_period", "day"),
+            alert_at=d.get("alert_at"),
         )
     except ValueError as e:
         raise _err(line, where, str(e)) from e
@@ -266,6 +268,10 @@ def resource_to_dict(r: ResourceSpec) -> dict:
         d["strict"] = False
     if r.version != 1:
         d["version"] = r.version
+    if r.calendar_period != "day":
+        d["calendar_period"] = r.calendar_period
+    if r.alert_at is not None:
+        d["alert_at"] = r.alert_at
     return d
 
 

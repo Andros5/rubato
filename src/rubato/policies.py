@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 
-from .core import Capacity, Demand
+from .core import Capacity, Demand, urgent_for
 from .model import ReadyItem, Reason
 from .resources import ResourceSpec
 
@@ -24,7 +24,7 @@ class _Base:
     def on_impossible(self, item: ReadyItem) -> str:
         return "run"
 
-    def held(self, now, item, spec, capacity, demand, round_alloc) -> tuple[int, int | None]:
+    def held(self, now, item, spec, capacity, demand, admitted) -> tuple[int, int | None]:
         return 0, None
 
     def config(self) -> dict:
@@ -81,11 +81,24 @@ class ReservePolicy(_Base):
     """
 
     name: str = "reserva"
+    version: int = 2
     reserve: dict[str, int] = field(default_factory=dict)
     release_at: int | None = None
     release_offset: int | None = None
     aging_limit: int | None = None
     impossible: str = "run"
+
+    def __post_init__(self):
+        if not isinstance(self.reserve, dict) or any(
+            not isinstance(k, str) or not k or type(v) is not int or v < 0 for k, v in self.reserve.items()
+        ):
+            raise ValueError("reserve must map resource IDs or patterns to non-negative integers")
+        if self.impossible not in ("run", "background", "drop"):
+            raise ValueError("impossible must be run, background or drop")
+        for name in ("release_at", "release_offset", "aging_limit"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 0):
+                raise ValueError(f"{name} must be a non-negative integer")
 
     def config(self) -> dict:
         return {
@@ -149,7 +162,7 @@ class ReservePolicy(_Base):
         spec: ResourceSpec,
         capacity: Capacity,
         demand: Sequence[Demand],
-        round_alloc: dict[tuple[str, bool], int],
+        admitted: set[tuple[str, str]],
     ) -> tuple[int, int | None]:
         amount = self.reserve_for(spec.id)
         if amount is None:
@@ -159,12 +172,9 @@ class ReservePolicy(_Base):
         aged = self.aging_limit is not None and now - item.ready_since >= self.aging_limit
         speculative = 0
         if not released and not aged:
-            urgent_used = capacity.ledger.used(spec.id, now, urgent=True) + round_alloc.get(
-                (spec.id, True), 0
-            )
+            urgent_used = capacity.ledger.used(spec.id, now, urgent=True)
             speculative = max(0, amount - urgent_used)
-        known = sum(d.need_on(spec) for d in demand if d.urgent and not self._lost(now, d))
-        known = max(0, known - round_alloc.get((spec.id, True), 0))
+        known = sum(d.pending_for(spec, admitted) for d in demand if d.urgent and not self._lost(now, d))
         held = max(speculative, known)
         hold_end = None
         if speculative > known:
@@ -175,11 +185,87 @@ class ReservePolicy(_Base):
         return held, hold_end
 
 
+@dataclass
+class FairPolicy(ReservePolicy):
+    """Weighted rotation for background steps using one shared resource."""
+
+    name: str = "fair"
+    version: int = 2
+    resource: str = ""
+    weights: dict[str, int] = field(default_factory=dict)
+
+    def __post_init__(self):
+        super().__post_init__()
+        if (
+            not isinstance(self.resource, str)
+            or not self.resource
+            or not isinstance(self.weights, dict)
+            or any(
+                not isinstance(client, str)
+                or not client
+                or type(weight) is not int
+                or not 1 <= weight <= 1000
+                for client, weight in self.weights.items()
+            )
+        ):
+            raise ValueError("fair requires a resource and positive integer client weights (1–1000)")
+
+    def config(self) -> dict:
+        return {**super().config(), "resource": self.resource, "weights": dict(self.weights)}
+
+    def round_order(self, now, ready, capacity):
+        from collections import deque
+
+        spec = capacity.ledger.specs.get(self.resource)
+        base = self.order(now, ready)
+        if spec is None:
+            yield from base
+            return
+        queues = {}
+        delayed = []
+        for item in base:
+            if urgent_for(now, item, self):
+                yield item
+            elif spec.applies(item.client, item.model, item.provider) and spec.need_of(item.need):
+                queues.setdefault(item.client, deque()).append(item)
+            else:
+                delayed.append(item)
+        previous, used = capacity.turn or ("", 0)
+        while queues:
+            clients = sorted(queues)
+            if previous in queues and used < self.weights.get(previous, 1):
+                client = previous
+            else:
+                client = next((c for c in clients if c > previous), clients[0])
+                used = 0
+            previous, used = client, min(used, self.weights.get(client, 1))
+            before = capacity.turn_deliveries
+            queue = queues[client]
+            head = queue.popleft()
+            yield head
+            closed = (head.job_id, head.step_id) in capacity.turn_closed
+            if not queue or (capacity.turn_deliveries == before and not closed):
+                queues.pop(client)
+                if queue:
+                    capacity.turn_blocked[client] = head
+                    delayed.extend(queue)
+                used = self.weights.get(client, 1)
+            elif not closed:
+                used = capacity.turn[1]
+        yield from delayed
+
+
 def make_policy(name: str, **params) -> _Base:
     if name == "fifo":
         return FifoPolicy(**params)
     if name == "radar":
         return RadarPolicy(**params)
     if name in ("reserva", "reserve"):
+        if params.get("version") == 1:
+            params["version"] = 2  # legacy parameters use the corrected planner on new runs
         return ReservePolicy(**params)
-    raise ValueError(f"unknown policy {name!r}; expected fifo, radar or reserva")
+    if name == "fair":
+        if params.get("version") == 1:
+            params["version"] = 2
+        return FairPolicy(**params)
+    raise ValueError(f"unknown policy {name!r}; expected fifo, radar, reserva or fair")

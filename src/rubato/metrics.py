@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 
 from .model import Action
 from .sim import SimResult
@@ -14,6 +15,38 @@ def pct(vals: list[float], q: float) -> float | None:
     s = sorted(vals)
     k = max(0, min(len(s) - 1, int(round(q * (len(s) - 1)))))
     return s[k]
+
+
+def costs(res: SimResult) -> dict:
+    owners = {r.job.id: r.job.client for r in res.jobs}
+    completed = Counter(r.job.client for r in res.jobs if r.status == "done")
+    currency_clients: dict[str, dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
+    for attempt in res.attempts:
+        if attempt.cost_source is None:
+            continue
+        totals = currency_clients[attempt.cost_currency or "unknown"][owners[attempt.job_id]]
+        if not attempt.settled:
+            totals["reserved"] += attempt.admitted.get("cost_micro", 0)
+        elif "cost_micro" in attempt.usage:
+            totals["confirmed"] += attempt.usage["cost_micro"]
+        else:
+            totals["unknown_attempts"] += 1
+            totals["uncertain"] += attempt.admitted.get("cost_micro", 0)
+    result = {}
+    for currency, clients in sorted(currency_clients.items()):
+        result[currency] = {}
+        for client, amounts in sorted(clients.items()):
+            n = completed[client]
+            result[currency][client] = {
+                **{k: amounts[k] for k in ("confirmed", "reserved", "uncertain", "unknown_attempts")},
+                "completed_jobs": n,
+                "cost_per_completed_job_micro": int(
+                    (Decimal(amounts["confirmed"]) / n).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+                )
+                if n
+                else None,
+            }
+    return result
 
 
 def summarize(res: SimResult) -> dict:
@@ -28,6 +61,7 @@ def summarize(res: SimResult) -> dict:
         pending = [res.end_t - r.job.arrival for r in rs if r.status == "pending"]
         return {
             "received": len(rs),
+            "started": len(started),
             "done": sum(r.status == "done" for r in rs),
             "done_on_time": sum(r.on_time for r in rs),
             "done_late": sum(r.status == "done" and not r.on_time for r in rs),
@@ -40,6 +74,9 @@ def summarize(res: SimResult) -> dict:
         }
 
     per_class = defaultdict(list)
+    per_client = defaultdict(list)
+    for r in res.jobs:
+        per_client[r.job.client].append(r)
     for r in background:
         per_class[r.job.cls].append(r)
     deferrals = Counter(str(d.reason) for d in res.decisions if d.action == Action.DEFER)
@@ -52,6 +89,13 @@ def summarize(res: SimResult) -> dict:
             "on_time_ratio": f"{sum(r.on_time for r in urgent)}/{len(urgent)}",
         },
         "background": {**block(background), "by_class": {k: block(v) for k, v in sorted(per_class.items())}},
+        "by_client": {
+            client: {
+                "urgent": block([r for r in results if r.job.urgent]),
+                "background": block([r for r in results if not r.job.urgent]),
+            }
+            for client, results in sorted(per_client.items())
+        },
         "by_arrival_provenance": {k: dict(sorted(v.items())) for k, v in sorted(by_prov.items())},
         "consumption": {
             "consumed": dict(res.consumed),
@@ -59,13 +103,14 @@ def summarize(res: SimResult) -> dict:
             "attempt_status": dict(sorted(Counter(a.status for a in res.attempts).items())),
             "observed_usage_attempts": sum(a.from_trace for a in res.attempts),
             "estimated_usage_attempts": sum(not a.from_trace for a in res.attempts),
+            "cost_by_currency_and_client": costs(res),
         },
         "deferrals_by_reason": dict(sorted(deferrals.items())),
         "closes_by_reason": dict(sorted(closes.items())),
         "planner": {
             "decision_rounds": len(lat),
-            "latency_us_p50": round(pct(lat, 0.5) or 0, 1),
-            "latency_us_p95": round(pct(lat, 0.95) or 0, 1),
+            "latency_us_p50": round(pct(lat, 0.5), 1) if lat else None,
+            "latency_us_p95": round(pct(lat, 0.95), 1) if lat else None,
             "max_ready_queue": res.max_queue,
         },
     }

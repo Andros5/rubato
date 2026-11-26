@@ -51,6 +51,26 @@ de `shadow` a `enforce`: `rubato shadow-report data/integrations/rubato-shadow.j
 Sin navegador: `rubato status` da el mismo resumen en la consola. Para que el servicio
 arranque solo al iniciar sesión: `scripts/ops/arranque_windows.ps1` (y `-Remove` para quitarlo).
 
+### Reproducir un incidente
+
+En **Trabajos → Reproducción de incidentes**, inicia una captura antes de reproducir el
+problema. Déjala abierta hasta que se resuelva y pulsa **Finalizar captura**. Se cierra
+automáticamente a los cinco minutos. **Capturas recientes** muestra las últimas
+capturas y su estado, incluso al abrir el panel en otra pestaña. Usa **Buscar por ID**
+para abrir una captura anterior. Desde la ficha del trabajo, **Reproducir incidente**
+muestra las decisiones registradas y los eventos de sus intentos. La comparación
+opcional aplica la política del formulario a los insumos observados de cada ronda.
+El panel señala las capturas parciales y las rondas que difieren de su registro.
+
+Puedes exportar el JSON y reproducirlo en otra sesión sin acceso al servicio con
+`rubato replay-incident captura-rubato-1.json --job radar:mi-trabajo`. Añade
+`--policy politica.json` para comparar una alternativa. El archivo contiene IDs y
+datos operativos de la cola y de la cuota.
+
+Con turno ponderado, **Resumen** muestra los permisos entregados en las últimas 24 h
+por cliente y revisión activa. El p95 mide desde que el paso queda listo hasta la
+entrega del permiso. La columna de solicitudes indica qué clientes pidieron huecos.
+
 ## 5. Coordinar aplicaciones
 
 `docker compose up --build -d` levanta el servicio. Cada aplicación usa el SDK:

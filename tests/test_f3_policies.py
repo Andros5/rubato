@@ -28,26 +28,26 @@ def day(urgent: bool, quota: int = 3):
 
 def test_day_where_reserving_helps():
     _, m = day(urgent=True)
-    assert m["reserva@1"]["urgent"]["done_on_time"] == 1 > m["fifo@1"]["urgent"]["done_on_time"] == 0
-    assert winners(m)["urgent_on_time"] == ["reserva@1"]
+    assert m["reserva@2"]["urgent"]["done_on_time"] == 1 > m["fifo@1"]["urgent"]["done_on_time"] == 0
+    assert winners(m)["urgent_on_time"] == ["reserva@2"]
 
 
 def test_day_where_reserving_hurts_background_and_reference_wins_visibly():
     runs, m = day(urgent=False)
     assert m["fifo@1"]["background"]["done_on_time"] == 3
-    assert m["reserva@1"]["background"]["done_on_time"] == 1
+    assert m["reserva@2"]["background"]["done_on_time"] == 1
     w = winners(m)
     assert w["background_on_time"] == ["fifo@1"]
-    assert w["urgent_on_time"] == ["fifo@1", "reserva@1"]  # tie is shown, not hidden
-    diff = what_if(runs["fifo@1"], runs["reserva@1"])
+    assert w["urgent_on_time"] == ["fifo@1", "reserva@2"]  # tie is shown, not hidden
+    diff = what_if(runs["fifo@1"], runs["reserva@2"])
     assert sorted(diff["lose"]) == ["analisis-2", "analisis-3"] and diff["gain"] == []
 
 
 def test_day_where_it_makes_no_difference():
     _, m = day(urgent=True, quota=10)
     keys = ("done_on_time", "done", "pending")
-    assert {k: m["fifo@1"]["urgent"][k] for k in keys} == {k: m["reserva@1"]["urgent"][k] for k in keys}
-    assert m["fifo@1"]["background"]["done_on_time"] == m["reserva@1"]["background"]["done_on_time"] == 3
+    assert {k: m["fifo@1"]["urgent"][k] for k in keys} == {k: m["reserva@2"]["urgent"][k] for k in keys}
+    assert m["fifo@1"]["background"]["done_on_time"] == m["reserva@2"]["background"]["done_on_time"] == 3
 
 
 def test_radar_reference_orders_by_priority_then_eligibility():

@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — Unreleased
 
-- CI: new `postgres` job brings up the Compose stack and runs the 23 service and
-  migration tests that the matrix skips. Checked against fastapi 0.165, psycopg 3.3.9,
-  psycopg-pool 3.3.3, ortools 9.15 and pytest 9.2; the lower bounds stay as they are.
+- Reservation `reserva@2` counts urgent admissions once and protects known demand only on applicable limits. Estimated deadline closures use the dependency critical path. Historical reports retain their saved results.
+- Windows launcher with separate Compose environments, real scheduler heartbeats and a portable comparison report. An isolated drill checks concurrent claims and reconciles simulated provider receipts after a replica stops.
+- Bounded what-if exploration, mapped CSV import, async coordination, decimal tariffs, monthly budgets and weighted background turns.
+- Policy drafts and conditional activation, paginated investigation and an offline bundle with integrity and replay verification.
+- Claims can be retried across API replicas with the same idempotency key. Permits issued in the same second retain planner order. Weighted policy `fair@2` includes urgency demoted to background in the normal rotation.
+- CI: the `postgres` job runs the service and migration suite on the isolated
+  interview Compose stack, with replica failover and a short claims benchmark.
 - Several providers with their own limits per client. Steps take an optional `provider`
   (trace, capture, service API, permits); resource `scope` accepts `provider` and
   combines it with `model` and `client`, e.g. `{"provider": "a", "client": "radar"}` is
@@ -15,7 +19,8 @@
   another. Results with a single provider are unchanged.
 - Unknown `scope` keys are rejected (they used to be ignored, so the limit applied to
   every step); `PUT /v1/admin/resources` answers 422 instead of 500 on invalid resources.
-- Migration `0004_step_provider.sql` (`steps.provider`).
+- Migration `0004_step_provider.sql` adds `steps.provider`. The scheduler, budget,
+  policy and incident migrations follow it. Existing 1.2.0 databases keep their data.
 
 ## 1.1.1 — 2026-11-24
 

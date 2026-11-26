@@ -42,12 +42,14 @@ se aplican al arrancar con un candado consultivo (varias réplicas a la vez son 
 
 ## Réplicas
 
-`docker compose --profile ha --profile demo up -d` añade una segunda réplica de la API (`:8001`)
-y el proveedor simulado que usa el simulacro.
-`python scripts/ops/ha_drill.py` ejecuta dos consumidores, mata una réplica durante una
-reserva y la otra durante una llamada simulada, y mide reatención, permisos duplicados,
-descuadre de saldo y latencia. En Kubernetes: `scripts/ops/k8s_up.ps1` y el mismo
-script con `--kill "kubectl:rubato/app=api#0,…"` (ver `deploy/`).
+`docker compose --profile ha up -d` añade una segunda réplica de la API (`:8001`).
+El proveedor simulado no forma parte de la pila principal: vive en el perfil `demo`, que
+solo activan los proyectos aparte de entrevista y de ensayo.
+`python scripts/ops/ha_drill.py` ejecuta el ensayo desde un proyecto Compose desechable.
+Consulta el [laboratorio](laboratorio.md) para abrirlo desde el mando local.
+El ensayo registra permisos concurrentes, recibos, saldo y tiempo hasta que la réplica
+superviviente vuelve a atender trabajo. Para levantar el clúster de desarrollo sigue
+`scripts/ops/k8s_up.ps1`.
 
 ## Recursos
 

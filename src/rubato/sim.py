@@ -17,14 +17,27 @@ from __future__ import annotations
 
 import heapq
 import time
+from collections import defaultdict, deque
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from .core import Capacity, Demand, decidir, need_by_resource, pause_key
-from .model import Action, Decision, Job, Outcome, ReadyItem, Reason, Status, find_cycle, tokens_total
+from .core import Capacity, Demand, StepDemand, decidir, pause_key, urgent_for
+from .model import (
+    Action,
+    Decision,
+    Job,
+    Outcome,
+    ReadyItem,
+    Reason,
+    Status,
+    critical_path,
+    find_cycle,
+    tokens_total,
+)
 from .resources import Ledger, ResourceSpec
+from .risk import Estimate, estimate_duration, forecast
 
-FINISH, PAUSE_END, CANCEL, CLIENT, ARRIVAL, WAKEUP = range(6)
+FINISH, PAUSE_END, CANCEL, CLIENT, ARRIVAL, CHANGE, WAKEUP = range(7)
 
 
 @dataclass
@@ -39,6 +52,13 @@ class ExternalEvent:
     usage: dict[str, int] | None = None  # for consume: usage by applications outside Rubato
     model: str | None = None
     provider: str | None = None
+
+
+@dataclass(frozen=True)
+class RuleChange:
+    t: int
+    policy: object | None = None
+    capacities: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -65,6 +85,9 @@ class AttemptRecord:
     usage: dict[str, int]
     admitted: dict[str, int]
     from_trace: bool
+    cost_currency: str | None = None
+    cost_source: str | None = None
+    settled: bool = False
 
 
 @dataclass
@@ -99,6 +122,7 @@ class SimResult:
     usage_log: list[tuple[str, int, int, bool, str]] = field(
         default_factory=list
     )  # rid, t, amount, urgent, owner
+    risk: list[dict] = field(default_factory=list)
 
     def by_id(self) -> dict[str, JobResult]:
         return {r.job.id: r for r in self.jobs}
@@ -115,6 +139,7 @@ class Simulator:
         max_iterations: int = 1_000_000,
         log_all_deferrals: bool = False,
         tariff=None,
+        change: RuleChange | None = None,
     ):
         ids = [j.id for j in jobs]
         if len(set(ids)) != len(ids):
@@ -132,19 +157,21 @@ class Simulator:
         self.max_iterations = max_iterations
         self.log_all = log_all_deferrals
         self.tariff = tariff
+        self.change = change
 
-    def _admission(self, step) -> dict[str, int]:
+    def _admission(self, step, t: int) -> dict[str, int]:
         amt = step.admission_amount()
-        return self.tariff.with_cost(step.model, amt) if self.tariff else amt
+        return self.tariff.with_cost(step.model, amt, t) if self.tariff else amt
 
-    def _usage(self, step, usage: dict[str, int]) -> dict[str, int]:
+    def _usage(self, step, usage: dict[str, int], t: int) -> dict[str, int]:
         u = tokens_total(usage)
-        return self.tariff.with_cost(step.model, u) if self.tariff else u
+        return self.tariff.with_cost(step.model, u, t) if self.tariff else u
 
     # ------------------------------------------------------------------
     def run(self) -> SimResult:
         ledger = Ledger(self.resources)
         cap = Capacity(ledger)
+        policy = self.policy
         heap: list[tuple[int, int, int, object]] = []
         counter = 0
 
@@ -163,6 +190,9 @@ class Simulator:
         wakeups: set[int] = set()
         latencies: list[float] = []
         max_queue = 0
+        risk = []
+        last_risk = {}
+        duration_history = defaultdict(lambda: deque(maxlen=100))
 
         for j in sorted(
             self.jobs.values(), key=lambda j: j.known_at if j.known_at is not None else j.arrival
@@ -179,6 +209,8 @@ class Simulator:
                 "consume": CLIENT,
             }[ev.kind]
             push(ev.t, kind, ev)
+        if self.change:
+            push(self.change.t, CHANGE, self.change)
 
         def refresh_ready(job: Job, t: int) -> None:
             for s in job.steps:
@@ -196,7 +228,7 @@ class Simulator:
                             job.id,
                             s.id,
                             st.attempts + 1,
-                            self.policy.label,
+                            policy.label,
                             Action.CLOSE,
                             Reason.DEPENDENCY_FAILED,
                             detail=st.detail,
@@ -220,16 +252,66 @@ class Simulator:
                     if job_status.get(job.id) in (None, "active"):
                         job_status[job.id] = "failed"
 
-        def remaining(job: Job, include_running: bool = False) -> tuple[dict[str, int], int]:
+        def remaining(job: Job, now: int) -> tuple[dict[str, int], int, tuple[StepDemand, ...]]:
             need: dict[str, int] = {}
-            dur = 0
+            durations = {}
+            pending = []
             for s in job.steps:
-                st = state[(job.id, s.id)].status
-                if st in ("waiting", "ready") or (include_running and st == "running"):
-                    for k, v in self._admission(s).items():
+                st = state[(job.id, s.id)]
+                if st.status in ("waiting", "ready"):
+                    amount = self._admission(s, now)
+                    pending.append(StepDemand(s.id, s.model, amount, s.provider))
+                    for k, v in amount.items():
                         need[k] = need.get(k, 0) + v
-                    dur += s.duration_estimate  # conservative: sequential critical path
-            return need, dur
+                    durations[s.id] = s.duration_estimate
+                elif st.status == "running":
+                    durations[s.id] = max(0, s.duration_estimate - (now - st.started[-1]))
+            duration, _ = critical_path({s.id: s.depends_on for s in job.steps}, durations)
+            return need, duration, tuple(pending)
+
+        def track_risk(now):
+            for jid in sorted(known, key=self.seq.__getitem__):
+                job = self.jobs[jid]
+                if not job.urgent or job.deadline is None:
+                    continue
+                steps = {}
+                for step in job.steps:
+                    st = state[jid, step.id]
+                    if st.status not in {"waiting", "ready", "running"}:
+                        continue
+                    duration, samples = estimate_duration(
+                        step.duration_estimate, list(duration_history[job.cls, step.model])
+                    )
+                    elapsed = now - st.started[-1] if st.status == "running" else 0
+                    unavailable = job.client in client_down and st.status != "running"
+                    next_t = st.next_t if st.status == "ready" and st.next_t and st.next_t > now else None
+                    blocking = (
+                        Reason.CLIENT_UNAVAILABLE
+                        if unavailable
+                        else st.reason
+                        if st.status == "ready"
+                        else None
+                    )
+                    steps[step.id] = Estimate(
+                        step.depends_on,
+                        max(0, duration - elapsed),
+                        None if unavailable else next_t,
+                        blocking,
+                        samples,
+                    )
+                if not steps:
+                    continue
+                assessment = forecast(now, job.deadline, steps)
+                signature = (
+                    assessment["status"],
+                    assessment["next_reconsider"],
+                    assessment["blocking"],
+                    assessment["expected_finish"],
+                    assessment["samples_by_step"],
+                )
+                if last_risk.get(jid) != signature:
+                    risk.append({"job": jid, "client": job.client, **assessment})
+                    last_risk[jid] = signature
 
         iterations = 0
         t = 0
@@ -242,13 +324,34 @@ class Simulator:
                 break
             while heap and heap[0][0] == t:
                 _, kind, _, payload = heapq.heappop(heap)
-                if kind == FINISH:
+                if kind == CHANGE:
+                    if payload.policy is not None:
+                        policy = payload.policy
+                    for rid, limit in payload.capacities.items():
+                        ledger.specs[rid] = replace(ledger.specs[rid], capacity=limit)
+                    last_logged.clear()
+                elif kind == FINISH:
                     rec: AttemptRecord = payload  # type: ignore[assignment]
                     job = self.jobs[rec.job_id]
                     step = job.step(rec.step_id)
                     st = state[(rec.job_id, rec.step_id)]
                     out, _ = step.outcome(rec.attempt)
-                    ledger.settle(rec.attempt_id, self._usage(step, out.usage))
+                    if rec.from_trace:
+                        duration_history[job.cls, step.model].append(out.duration)
+                    rec.usage = self._usage(step, out.usage, rec.start)
+                    rec.status = str(out.status)
+                    if "cost_micro" in out.usage:
+                        rec.cost_source = "explicit"
+                    elif self.tariff:
+                        rec.cost_source = (
+                            "tariff"
+                            if "cost_micro" in rec.usage
+                            else "partial"
+                            if {"tokens_in", "tokens_out"} & out.usage.keys()
+                            else "unknown"
+                        )
+                    ledger.settle(rec.attempt_id, rec.usage)
+                    rec.settled = True
                     if st.status == "cancelled_running":
                         st.status = "closed"
                         st.reason = Reason.CANCELLED
@@ -271,7 +374,7 @@ class Simulator:
                                     job.id,
                                     step.id,
                                     st.attempts,
-                                    self.policy.label,
+                                    policy.label,
                                     Action.CLOSE,
                                     Reason.MAX_ATTEMPTS,
                                     detail=st.detail,
@@ -306,7 +409,7 @@ class Simulator:
                                         job.id,
                                         s.id,
                                         st.attempts + 1,
-                                        self.policy.label,
+                                        policy.label,
                                         Action.CLOSE,
                                         Reason.CANCELLED,
                                         detail="job cancelled; future steps closed",
@@ -340,17 +443,12 @@ class Simulator:
             known = {x for x in known if job_status.get(x) == "active"}  # finished jobs leave the round
             for jid in sorted(known, key=self.seq.__getitem__):
                 job = self.jobs[jid]
-                rem_need, rem_dur = remaining(job)
-                if rem_need:
+                rem_need, rem_dur, pending = remaining(job, t)
+                if pending:
                     waits = [
                         state[(jid, s.id)].ready_since
                         for s in job.steps
                         if state[(jid, s.id)].status == "ready"
-                    ]
-                    pending = [
-                        (s.model, s.provider, self._admission(s))
-                        for s in job.steps
-                        if state[(jid, s.id)].status in ("waiting", "ready")
                     ]
                     demand.append(
                         Demand(
@@ -360,7 +458,8 @@ class Simulator:
                             rem_need,
                             min(waits) if waits else None,
                             rem_dur,
-                            need_by_resource(self.resources, job.client, pending),
+                            job.client,
+                            pending,
                         )
                     )
                 for s in job.steps:
@@ -378,7 +477,7 @@ class Simulator:
                                     jid,
                                     s.id,
                                     st.attempts + 1,
-                                    self.policy.label,
+                                    policy.label,
                                     Action.DEFER,
                                     Reason.CLIENT_UNAVAILABLE,
                                     detail=f"client {job.client} has no executor available",
@@ -397,7 +496,7 @@ class Simulator:
                             step_id=s.id,
                             attempt=st.attempts + 1,
                             ready_since=st.ready_since if st.ready_since is not None else t,
-                            need=self._admission(s),
+                            need=self._admission(s, t),
                             remaining_need=rem_need,
                             remaining_duration=rem_dur,
                             model=s.model,
@@ -407,10 +506,12 @@ class Simulator:
                     )
             max_queue = max(max_queue, len(ready))
             if not ready or (self.horizon is not None and t >= self.horizon):
+                track_risk(t)
                 continue  # at the horizon, finishing events count but nothing new starts
             t0 = time.perf_counter()
-            round_decisions = decidir(t, ready, cap, self.policy, demand)
+            round_decisions = decidir(t, ready, cap, policy, demand)
             latencies.append((time.perf_counter() - t0) * 1e6)
+            ready_by_step = {(item.job_id, item.step_id): item for item in ready}
             next_times: list[int] = []
             for d in round_decisions:
                 key = (d.job_id, d.step_id)
@@ -418,16 +519,24 @@ class Simulator:
                 job = self.jobs[d.job_id]
                 step = job.step(d.step_id)
                 if d.action == Action.AUTHORIZE:
+                    if turn := (d.value or {}).get("turn"):
+                        cap.turn = (turn["client"], turn["position"])
                     st.attempts += 1
                     st.status = "running"
+                    st.reason, st.next_t = None, None
                     st.started.append(t)
                     out, from_trace = step.outcome(st.attempts)
                     aid = f"{job.id}/{step.id}/{st.attempts}"
-                    admitted = self._admission(step)
-                    for spec in [
-                        r for r in self.resources if r.applies(job.client, step.model, step.provider)
-                    ]:
-                        ledger.book(spec.id, t, spec.need_of(admitted), aid, job.urgent, job.client)
+                    admitted = self._admission(step, t)
+                    for spec in cap.applicable(ready_by_step[key]):
+                        ledger.book(
+                            spec.id,
+                            t,
+                            spec.need_of(admitted),
+                            aid,
+                            urgent_for(t, ready_by_step[key], policy),
+                            job.client,
+                        )
                     rec = AttemptRecord(
                         aid,
                         job.id,
@@ -435,10 +544,12 @@ class Simulator:
                         st.attempts,
                         t,
                         t + out.duration,
-                        str(out.status),
-                        self._usage(step, out.usage),
+                        "running",
+                        {},
                         admitted,
                         from_trace,
+                        self.tariff.currency if self.tariff else None,
+                        "pending" if self.tariff or "cost_micro" in admitted else None,
                     )
                     attempts.append(rec)
                     push(t + out.duration, FINISH, rec)
@@ -466,6 +577,7 @@ class Simulator:
                 if nt not in wakeups and (self.horizon is None or nt < self.horizon):
                     wakeups.add(nt)
                     push(nt, WAKEUP, None)
+            track_risk(t)
 
         results: list[JobResult] = []
         for jid, job in self.jobs.items():
@@ -482,16 +594,17 @@ class Simulator:
                 )
             )
         return SimResult(
-            policy=self.policy.label,
-            policy_config=self.policy.config(),
+            policy=policy.label,
+            policy_config=policy.config(),
             jobs=results,
             decisions=decisions,
             attempts=attempts,
-            resources=self.resources,
+            resources=cap.specs,
             consumed={rid: ledger.consumed(rid) for rid in ledger.specs},
-            end_t=t,
+            end_t=self.horizon if self.horizon is not None else t,
             decision_latency_us=latencies,
             max_queue=max_queue,
+            risk=risk,
             usage_log=sorted(
                 (e.resource, e.t, e.amount, e.urgent, e.attempt_id)
                 for es in ledger.entries.values()

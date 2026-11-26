@@ -35,11 +35,23 @@ dist/
 
 # local development tool settings
 .claude/
-
-# daily work stays local: plans, phase log, internal reports, agent instructions
-docs/desarrollo/
+.codex/
+.cursor/
 CLAUDE.md
 AGENTS.md
-.codex/
+
+# daily work stays local: plans, phase log, internal reports, agent instructions
+PLAN*.md
+ESTADO.md
+STATUS.md
+HANDOFF*
+docs/desarrollo/
 docs/release-v1.0.0.md
 docs/piloto.md
+/examples/entrevista/*
+!/examples/entrevista/reservas.json
+!/examples/entrevista/intentos.csv
+!/examples/entrevista/mapa.json
+!/examples/entrevista/tarifa.json
+/output/playwright/
+/.playwright-cli/

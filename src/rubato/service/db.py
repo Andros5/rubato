@@ -9,6 +9,14 @@ import psycopg
 from psycopg.rows import dict_row
 
 MIGRATIONS_PKG = "rubato.service.migrations"
+# Early 1.2.0 installations used these filenames before provider support took 0004.
+LEGACY_NAMES = {
+    "0005_scheduler_status.sql": "0004_scheduler_status.sql",
+    "0006_budgets_and_turns.sql": "0005_budgets_and_turns.sql",
+    "0007_policy_revisions.sql": "0006_policy_revisions.sql",
+    "0008_observation.sql": "0007_observation.sql",
+    "0009_incident_and_deliveries.sql": "0008_incident_and_deliveries.sql",
+}
 
 
 def dsn() -> str:
@@ -45,6 +53,15 @@ def migrate(conn: psycopg.Connection, upto: str | None = None) -> list[str]:
             conn.execute("SELECT pg_advisory_xact_lock(7342001)")
             if conn.execute("SELECT 1 FROM schema_migrations WHERE name=%s", (name,)).fetchone():
                 continue
+            if name in LEGACY_NAMES:
+                # Preserve the old entry for rollback and carry its original application time forward.
+                alias = conn.execute(
+                    "INSERT INTO schema_migrations (name, applied_at) "
+                    "SELECT %s, applied_at FROM schema_migrations WHERE name=%s RETURNING name",
+                    (name, LEGACY_NAMES[name]),
+                ).fetchone()
+                if alias:
+                    continue
             conn.execute(sql)
             conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
         applied.append(name)

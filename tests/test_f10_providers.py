@@ -3,7 +3,7 @@
 import pytest
 
 from rubato.model import Job, Outcome, Provenance, Reason, Status, Step
-from rubato.policies import FifoPolicy, ReservePolicy
+from rubato.policies import FairPolicy, FifoPolicy, ReservePolicy
 from rubato.resources import ResourceSpec
 from rubato.sim import ExternalEvent, simulate
 from rubato.trace import SCHEMA, Trace, TraceError, dumps, loads
@@ -108,6 +108,15 @@ def test_unknown_scope_keys_are_rejected_instead_of_applying_to_everything():
         ResourceSpec("x", "requests", 1, "total", scope={"vendor": "a"})
     with pytest.raises(ValueError, match="non-empty"):
         ResourceSpec("x", "requests", 1, "total", scope={"provider": ""})
+
+
+def test_weighted_turns_only_count_work_on_the_selected_provider():
+    jobs = [J("radar-a", "radar", "a"), J("citalab-a", "citalab", "a"), J("radar-b", "radar", "b")]
+    policy = FairPolicy(resource="a-total", weights={"radar": 2, "citalab": 1})
+    result = simulate(jobs, PROVIDERS, policy)
+    turns = [d.job_id for d in result.decisions if (d.value or {}).get("turn")]
+    assert set(turns) == {"radar-a", "citalab-a"}
+    assert starts(result, "radar-b") == [0]
 
 
 def test_trace_keeps_the_provider_of_steps_events_and_resources():

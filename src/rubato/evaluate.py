@@ -141,7 +141,8 @@ def evaluate(
                 r = runs[lbl]
                 return (
                     -r["urgent"]["done_on_time"],
-                    r["background"]["wait_p95"] or 0,
+                    r["background"]["wait_p95"] is None,
+                    r["background"]["wait_p95"],
                     sum(r["config"].get("reserve", {}).values()),
                 )
 
@@ -156,8 +157,17 @@ def evaluate(
         if "radar" in test and result.get("chosen") in test:
             ref, cand = test["radar"], test[result["chosen"]]
             gain = cand["urgent"]["done_on_time"] - ref["urgent"]["done_on_time"]
-            extra_wait = (cand["background"]["wait_p95"] or 0) - (ref["background"]["wait_p95"] or 0)
-            ok = gain >= pilot["min_urgent_gain"] and extra_wait <= pilot["max_background_p95_extra_s"]
+            candidate_wait, reference_wait = cand["background"]["wait_p95"], ref["background"]["wait_p95"]
+            extra_wait = (
+                candidate_wait - reference_wait
+                if candidate_wait is not None and reference_wait is not None
+                else None
+            )
+            ok = (
+                gain >= pilot["min_urgent_gain"]
+                and extra_wait is not None
+                and extra_wait <= pilot["max_background_p95_extra_s"]
+            )
             result["verdict"] = {
                 "urgent_gain": gain,
                 "background_p95_extra_s": extra_wait,

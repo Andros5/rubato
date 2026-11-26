@@ -6,9 +6,12 @@ Set RUBATO_TEST_API (e.g. http://127.0.0.1:8000). Tokens default to the Compose 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import httpx
 import pytest
+
+from rubato.local import DRILL_PORTS, LocalStack
 
 API = os.environ.get("RUBATO_TEST_API")
 PROVIDER = os.environ.get("RUBATO_TEST_PROVIDER", "http://127.0.0.1:8100")
@@ -24,6 +27,17 @@ needs_service = pytest.mark.skipif(not API, reason="set RUBATO_TEST_API to a run
 def client(who: str) -> httpx.Client:
     assert API
     return httpx.Client(base_url=API, headers={"Authorization": f"Bearer {TOKENS[who]}"}, timeout=30)
+
+
+def checked_compose_stack():
+    stack = LocalStack(
+        Path(__file__).resolve().parents[1], trial=API == f"http://127.0.0.1:{DRILL_PORTS['api']}"
+    ).resolve()
+    _, ports = stack.config()
+    assert API == f"http://127.0.0.1:{ports['api']}"
+    rows = stack.containers(verify=True)
+    stack.verify_bindings(ports, rows)
+    return stack, ports
 
 
 def ok(r: httpx.Response, status: int | tuple = (200, 201)) -> dict:

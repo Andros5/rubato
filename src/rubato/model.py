@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import cache
 
 UNITS = ("requests", "tokens_in", "tokens_out", "tokens_total", "cost_micro", "concurrent")
 
@@ -66,6 +67,21 @@ def tokens_total(usage: dict[str, int]) -> dict[str, int]:
     if "tokens_in" in usage and "tokens_out" in usage:
         return {**usage, "tokens_total": usage["tokens_in"] + usage["tokens_out"]}
     return usage
+
+
+def critical_path(
+    dependencies: dict[str, tuple[str, ...]], remaining: dict[str, int]
+) -> tuple[int, tuple[str, ...]]:
+    """Longest estimated dependent path among unfinished steps, assuming parallel executors."""
+
+    @cache
+    def path(step: str) -> tuple[int, tuple[str, ...]]:
+        if step not in remaining:
+            return 0, ()
+        duration, prefix = max((path(dep) for dep in dependencies[step]), default=(0, ()))
+        return duration + remaining[step], (*prefix, step)
+
+    return max((path(step) for step in remaining), default=(0, ()))
 
 
 @dataclass(frozen=True)
@@ -159,6 +175,8 @@ class Reason(StrEnum):
     MAX_ATTEMPTS = "max_attempts"
     CANCELLED = "cancelled"
     CLIENT_UNAVAILABLE = "client_unavailable"
+    USAGE_UNKNOWN = "usage_unknown"
+    FAIR_TURN = "fair_turn"
 
 
 @dataclass(frozen=True)

@@ -43,10 +43,32 @@ def cmd_synth(a: argparse.Namespace) -> int:
 
 
 def cmd_simulate(a: argparse.Namespace) -> int:
+    from importlib.resources import files
+
     from .runs import run_scenario
 
     names = [n.strip() for n in a.policies.split(",") if n.strip()]
-    m = run_scenario(a.trace, a.scenario, a.scenarios, a.policies_file, names, a.out, grid=not a.no_grid)
+    data = files("rubato.data")
+    scenarios = (
+        data.joinpath("scenarios.json")
+        if a.scenarios == "examples/scenarios.json" and not Path(a.scenarios).exists()
+        else a.scenarios
+    )
+    policies = (
+        data.joinpath("policies.json")
+        if a.policies_file == "examples/policies.json" and not Path(a.policies_file).exists()
+        else a.policies_file
+    )
+    m = run_scenario(
+        a.trace,
+        a.scenario,
+        scenarios,
+        policies,
+        names,
+        a.out,
+        grid=not a.no_grid,
+        tariff_path=a.tariff,
+    )
     for label in m["runs"]:
         s = json.loads((Path(a.out) / label / "summary.json").read_text(encoding="utf-8"))
         u, b = s["urgent"], s["background"]
@@ -65,6 +87,144 @@ def cmd_compare(a: argparse.Namespace) -> int:
 
     p = build_report(read_run(a.run), a.report)
     print(f"wrote {p}")
+    return 0
+
+
+def cmd_explore(a: argparse.Namespace) -> int:
+    from .explore import run_explore
+
+    return run_explore(a.run, a.spec, a.out)
+
+
+def cmd_bundle(a: argparse.Namespace) -> int:
+    from .bundle import bundle
+
+    result = bundle(a.run, a.out)
+    print(f"{result['kind']} · {a.out}")
+    return 0
+
+
+def cmd_verify(a: argparse.Namespace) -> int:
+    from zipfile import BadZipFile
+
+    from .bundle import verify
+
+    try:
+        result = verify(a.archive, replay=a.replay)
+    except BadZipFile as exc:
+        raise ValueError(f"invalid bundle archive {a.archive}: {exc}") from exc
+    print(f"{result['kind']} · {len(result['files'])} archivos verificados")
+    return 0
+
+
+def cmd_replay_incident(a: argparse.Namespace) -> int:
+    from .policies import make_policy
+    from .service.recording import replay_capture
+
+    capture = json.loads(a.capture.read_text(encoding="utf-8"))
+    if not isinstance(capture, dict) or capture.get("body", {}).get("schema") != "rubato.incident/v1":
+        raise ValueError("expected a rubato.incident/v1 export from the live panel")
+    candidate = None
+    if a.policy is not None:
+        config = json.loads(a.policy.read_text(encoding="utf-8"))
+        if not isinstance(config, dict) or not isinstance(config.get("name"), str):
+            raise ValueError("--policy expects a JSON object with a policy name")
+        try:
+            candidate = make_policy(config.pop("name"), **config).config()
+        except TypeError as exc:
+            raise ValueError(f"invalid policy configuration: {exc}") from exc
+    result = replay_capture(capture, candidate, a.job)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return int(result["matched_rounds"] != result["coverage"]["rounds"])
+
+
+def cmd_import_csv(a: argparse.Namespace) -> int:
+    from .importers.csv import convert
+
+    print(json.dumps(convert(a.file, a.mapping, a.out), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_validate(a: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from .trace import load
+
+    try:
+        tr = load(a.file)
+    except (OSError, ValueError) as exc:
+        if not a.json:
+            raise
+        print(json.dumps({"valid": False, "error": str(exc)}, ensure_ascii=False))
+        return 2
+    result = {
+        "valid": True,
+        "fingerprint": tr.fingerprint(),
+        "jobs": len(tr.jobs),
+        "resources": len(tr.resources),
+        "arrival_provenance": dict(Counter(j.arrival_provenance for j in tr.jobs)),
+        "jobs_with_deadline": sum(j.deadline is not None for j in tr.jobs),
+    }
+    print(json.dumps(result, indent=2 if a.json else None))
+    return 0
+
+
+def cmd_doctor(a: argparse.Namespace) -> int:
+    import platform
+
+    from .local import LocalError, LocalStack, probe
+
+    try:
+        import tkinter
+
+        tk = tkinter.TkVersion
+    except ImportError:
+        tk = None
+    checks = {"environment": a.env, "python": platform.python_version(), "tk": tk, "simulator": True}
+    status = 0
+    if not a.offline:
+        try:
+            stack = LocalStack(a.root, demo=a.env == "entrevista").resolve()
+            _, ports = stack.config()
+            stack.check_ports(ports, stack.containers(verify=True))
+            state, _ = stack.status()
+            checks.update({"services": state, "ports": ports, "api": probe(ports["api"], "/readyz")})
+        except LocalError as exc:
+            checks["docker"] = str(exc)
+            status = 1
+    print(json.dumps(checks, ensure_ascii=False, indent=2))
+    return status
+
+
+def cmd_digest(a: argparse.Namespace) -> int:
+    import os
+    import re
+
+    from .sdk import RubatoClient
+
+    span = re.fullmatch(r"(\d{1,7})([smhd])", a.since)
+    if not span:
+        raise ValueError("--since expects a duration such as 24h")
+    seconds = int(span[1]) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[span[2]]
+    client = RubatoClient(a.api, a.token or os.environ.get("RUBATO_ADMIN_TOKEN", "admin-local-token"))
+    try:
+        report = client._req("GET", f"/v1/admin/digest?seconds={seconds}")
+    finally:
+        client.http.close()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_risk_evaluate(a: argparse.Namespace) -> int:
+    from .risk import calibrate
+    from .runs import read_run
+
+    design, test = (read_run(p) for p in (a.design, a.test))
+    end = max(j["arrival"] for j in design["runs"][a.policy]["jobs"])
+    start = min(j["arrival"] for j in test["runs"][a.policy]["jobs"])
+    if end >= start:
+        raise ValueError("the calibration period must precede the evaluation period")
+    print(json.dumps(calibrate(design["runs"][a.policy], test["runs"][a.policy]), indent=2))
     return 0
 
 
@@ -114,7 +274,8 @@ def cmd_evaluate(a: argparse.Namespace) -> int:
 def cmd_shadow_report(a: argparse.Namespace) -> int:
     from .shadow import shadow_report, to_text
 
-    r = shadow_report(a.file)
+    template = json.loads(a.template.read_text(encoding="utf-8")) if a.template else None
+    r = shadow_report(a.file, template)
     print(json.dumps(r, indent=2) if a.json else to_text(r))
     return 0
 
@@ -225,12 +386,66 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--policies-file", default="examples/policies.json")
     s.add_argument("--out", required=True)
     s.add_argument("--no-grid", action="store_true", help="skip the precomputed reserve variants")
+    s.add_argument("--tariff", type=Path, help="versioned tariff profile")
     s.set_defaults(fn=cmd_simulate)
 
     s = sub.add_parser("compare", help="build the self-contained HTML comparison")
     s.add_argument("--run", required=True)
     s.add_argument("--report", required=True)
     s.set_defaults(fn=cmd_compare)
+
+    s = sub.add_parser("explore", help="try a bounded grid of changes from a saved decision")
+    s.add_argument("--run", required=True, type=Path)
+    s.add_argument("--spec", required=True, type=Path)
+    s.add_argument("--out", required=True, type=Path)
+    s.set_defaults(fn=cmd_explore)
+
+    s = sub.add_parser("bundle", help="export a portable or aggregated comparison")
+    s.add_argument("--run", required=True, type=Path)
+    s.add_argument("--out", required=True, type=Path)
+    s.set_defaults(fn=cmd_bundle)
+
+    s = sub.add_parser("verify", help="verify a bundle's contents against its manifest")
+    s.add_argument("archive", type=Path)
+    s.add_argument("--replay", action="store_true", help="reproduce the synthetic results with this engine")
+    s.set_defaults(fn=cmd_verify)
+
+    s = sub.add_parser("import-csv", help="convert attempt rows using an explicit map")
+    s.add_argument("file", type=Path)
+    s.add_argument("--mapping", type=Path, required=True)
+    s.add_argument("--out", type=Path, required=True)
+    s.set_defaults(fn=cmd_import_csv)
+
+    s = sub.add_parser("validate", help="validate a trace and show field coverage")
+    s.add_argument("file", type=Path)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_validate)
+
+    s = sub.add_parser("doctor", help="check the simulator or the local Compose environment")
+    s.add_argument("--env", choices=("entrevista", "habitual"), default="entrevista")
+    s.add_argument("--root", type=Path, default=Path.cwd())
+    s.add_argument("--offline", action="store_true")
+    s.set_defaults(fn=cmd_doctor)
+
+    s = sub.add_parser("digest", help="incidents and policy revisions during a time window")
+    s.add_argument("--since", default="24h")
+    s.add_argument("--api", default="http://127.0.0.1:8000")
+    s.add_argument("--token")
+    s.set_defaults(fn=cmd_digest)
+
+    s = sub.add_parser("risk-evaluate", help="calibrate deadline alerts on one period and score on another")
+    s.add_argument("--design", required=True, type=Path)
+    s.add_argument("--test", required=True, type=Path)
+    s.add_argument("--policy", default="radar")
+    s.set_defaults(fn=cmd_risk_evaluate)
+
+    s = sub.add_parser(
+        "replay-incident", help="replay the live rounds in an exported incident without a server"
+    )
+    s.add_argument("capture", type=Path)
+    s.add_argument("--job", help="filter the timeline by the fully qualified job id")
+    s.add_argument("--policy", type=Path, help="JSON policy configuration to compare on each observed round")
+    s.set_defaults(fn=cmd_replay_incident)
 
     s = sub.add_parser("explain", help="explain every decision about one job")
     s.add_argument("--run", required=True)
@@ -261,6 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("shadow-report", help="agreement, divergences and added latency of a shadow phase")
     s.add_argument("file", help="JSONL written by an adapter in shadow mode")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--template", type=Path, help="override the illustrative shadow trial thresholds")
     s.set_defaults(fn=cmd_shadow_report)
 
     s = sub.add_parser("init-demo", help="copy the synthetic example files into DIR/examples")
@@ -285,6 +501,10 @@ def cmd_init_demo(a: argparse.Namespace) -> int:
     dest.mkdir(parents=True, exist_ok=True)
     for name in ("demo.jsonl", "scenarios.json", "policies.json"):
         (dest / name).write_bytes(ires.files("rubato.data").joinpath(name).read_bytes())
+    examples = dest / "entrevista"
+    examples.mkdir(exist_ok=True)
+    for name in ("reservas.json", "intentos.csv", "mapa.json", "tarifa.json"):
+        (examples / name).write_bytes(ires.files("rubato.data").joinpath("workbench", name).read_bytes())
     print(f"wrote {dest} (synthetic demo trace, scenarios and frozen policies)")
     return 0
 
@@ -306,7 +526,11 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     args = build_parser().parse_args(argv)
-    return int(args.fn(args) or 0)
+    try:
+        return int(args.fn(args) or 0)
+    except (OSError, ValueError, KeyError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

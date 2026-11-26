@@ -23,18 +23,20 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 
 import psycopg
 
-from ..core import Capacity, Demand, decidir, need_by_resource, pause_key
-from ..model import Action, ReadyItem, Reason, find_cycle, tokens_total
-from ..policies import RadarPolicy, make_policy
+from ..core import Capacity, Demand, StepDemand, decidir, pause_key, urgent_for
+from ..model import Action, ReadyItem, Reason, critical_path, find_cycle, tokens_total
+from ..policies import FairPolicy, RadarPolicy, make_policy
 from ..resources import Entry, Ledger, ResourceSpec
+from ..tariffs import Tariff, cost_from_prices
+from .recording import record_round
 
 GRANT_TTL = int(os.environ.get("RUBATO_GRANT_TTL", "60"))
 ATTEMPT_TIMEOUT = int(os.environ.get("RUBATO_ATTEMPT_TIMEOUT", "600"))
 EXECUTOR_TTL = int(os.environ.get("RUBATO_EXECUTOR_TTL", "120"))
-LOOKBACK = int(os.environ.get("RUBATO_LEDGER_LOOKBACK", str(3 * 86400)))
 EXACT_UNITS = {"requests", "concurrent"}
 
 
@@ -111,13 +113,24 @@ def put_resources(conn, specs: list[dict], by: str) -> list[ResourceSpec]:
         raise ApiError(422, "invalid", str(e)) from e
     ids = [p.id for p in parsed]
     lock(conn)
+    previous = {spec.id: spec for spec in load_resources(conn)}
     for p in parsed:
+        old = previous.get(p.id)
+        identity = ("unit", "window", "length", "reset_tz", "offset", "scope", "calendar_period")
+        if (
+            old
+            and any(getattr(old, key) != getattr(p, key) for key in identity)
+            and conn.execute("SELECT 1 FROM ledger WHERE resource_id=%s LIMIT 1", (p.id,)).fetchone()
+        ):
+            raise ApiError(
+                409, "resource_has_history", f"resource {p.id!r} has ledger history; choose a new resource id"
+            )
         conn.execute(
-            "INSERT INTO resources (id, unit, capacity, win, length, reset_tz, win_offset, scope, strict, version) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO UPDATE SET unit=EXCLUDED.unit, "
+            "INSERT INTO resources (id, unit, capacity, win, length, reset_tz, win_offset, scope, strict, version, calendar_period, alert_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO UPDATE SET unit=EXCLUDED.unit, "
             "capacity=EXCLUDED.capacity, win=EXCLUDED.win, length=EXCLUDED.length, reset_tz=EXCLUDED.reset_tz, "
             "win_offset=EXCLUDED.win_offset, scope=EXCLUDED.scope, strict=EXCLUDED.strict, "
-            "version=resources.version + 1",
+            "version=resources.version + 1, calendar_period=EXCLUDED.calendar_period, alert_at=EXCLUDED.alert_at",
             (
                 p.id,
                 p.unit,
@@ -129,6 +142,8 @@ def put_resources(conn, specs: list[dict], by: str) -> list[ResourceSpec]:
                 json.dumps(p.scope),
                 p.strict,
                 p.version,
+                p.calendar_period,
+                p.alert_at,
             ),
         )
     unused = conn.execute(
@@ -159,12 +174,15 @@ def load_resources(conn) -> list[ResourceSpec]:
             r["scope"] or {},
             r["strict"],
             r["version"],
+            r["calendar_period"],
+            r["alert_at"],
         )
         for r in rows
     ]
 
 
 def set_policy(conn, cfg: dict, by: str) -> dict:
+    lock(conn)
     params = dict(cfg)
     make_policy(params.pop("name"), **params)  # validate
     row = conn.execute(
@@ -172,6 +190,107 @@ def set_policy(conn, cfg: dict, by: str) -> dict:
         (json.dumps(cfg), now(conn), by),
     ).fetchone()
     return {"version": row["id"], **cfg}
+
+
+def checked_policy(cfg):
+    if not isinstance(cfg, dict):
+        raise ApiError(422, "invalid_policy", "policy must be an object")
+    try:
+        params = dict(cfg)
+        return make_policy(params.pop("name"), **params).config()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ApiError(422, "invalid_policy", str(exc)) from exc
+
+
+def new_policy_draft(conn, schema, author):
+    lock(conn)
+    policy = checked_policy(schema.get("policy"))
+    _, version = load_policy(conn)
+    base = schema.get("base_revision", version or 0)
+    if type(base) is not int or base < 0:
+        raise ApiError(422, "invalid_revision", "invalid base revision")
+    if (
+        base
+        and not conn.execute(
+            "SELECT 1 FROM config_versions WHERE kind='policy' AND id=%s", (base,)
+        ).fetchone()
+    ):
+        raise ApiError(404, "not_found", "base revision was not found")
+    return conn.execute(
+        "INSERT INTO policy_drafts (base_revision, body, created_at, created_by) "
+        "VALUES (%s,%s,%s,%s) RETURNING *",
+        (base, json.dumps(policy), now(conn), author),
+    ).fetchone()
+
+
+def policy_draft(conn, did):
+    row = conn.execute("SELECT * FROM policy_drafts WHERE id=%s", (did,)).fetchone()
+    if row is None:
+        raise ApiError(404, "not_found", "policy draft was not found")
+    return row
+
+
+def policy_revision(conn, version: int):
+    if version == 0:
+        return RadarPolicy().config()
+    row = conn.execute(
+        "SELECT body FROM config_versions WHERE kind='policy' AND id=%s", (version,)
+    ).fetchone()
+    if row is None:
+        raise ApiError(404, "not_found", "policy revision was not found")
+    return row["body"]
+
+
+def activate_revision(conn, client, expected, reason, target, *, revert=False):
+    lock(conn)
+    if expected is None:
+        raise ApiError(428, "precondition_required", "If-Match is required")
+    if (
+        len(expected) > 24
+        or not expected.startswith('"')
+        or not expected.endswith('"')
+        or not expected[1:-1].isascii()
+        or not expected[1:-1].isdecimal()
+    ):
+        raise ApiError(422, "invalid_revision", 'If-Match must contain a quoted revision, for example "0"')
+    _, current = load_policy(conn)
+    current = current or 0
+    if int(expected[1:-1]) != current:
+        raise ApiError(412, "revision_changed", "the active revision changed", {"revision": current})
+    reason = reason.strip() if isinstance(reason, str) else ""
+    if not reason or len(reason) > 500:
+        raise ApiError(422, "invalid_reason", "reason must contain 1–500 characters")
+    if revert:
+        policy = checked_policy(policy_revision(conn, target))
+    else:
+        draft = policy_draft(conn, target)
+        if draft["base_revision"] != current:
+            raise ApiError(
+                412, "stale_draft", "the draft was based on an earlier revision", {"revision": current}
+            )
+        policy = draft["body"]
+    t = now(conn)
+    revision = conn.execute(
+        "INSERT INTO config_versions (kind, body, created_at, created_by, based_on, source_draft, restored_from, reason) "
+        "VALUES ('policy',%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (
+            json.dumps(policy),
+            t,
+            client["id"],
+            current,
+            None if revert else target,
+            target if revert else None,
+            reason,
+        ),
+    ).fetchone()["id"]
+    event(
+        conn,
+        t,
+        "policy_activated",
+        client["id"],
+        payload={"previous": current, "revision": revision, "reason": reason},
+    )
+    return {"revision": revision, "previous_revision": current, "policy": policy}
 
 
 def load_policy(conn):
@@ -182,6 +301,64 @@ def load_policy(conn):
         return RadarPolicy(), None  # F4 verdict: the reference is the default
     params = dict(r["body"])
     return make_policy(params.pop("name"), **params), r["id"]
+
+
+def save_tariff(conn, config, author):
+    tariff = Tariff.from_config(config)
+    lock(conn)
+    previous = active_tariff(conn)
+    if (
+        previous
+        and previous.currency != tariff.currency
+        and conn.execute(
+            "SELECT 1 FROM ledger l JOIN resources r ON l.resource_id=r.id WHERE r.unit='cost_micro' LIMIT 1"
+        ).fetchone()
+    ):
+        raise ApiError(
+            409, "currency_change", "budget balances still contain amounts in the previous currency"
+        )
+    row = conn.execute(
+        "INSERT INTO config_versions (kind, body, created_at, created_by) VALUES ('tariff',%s,%s,%s) RETURNING id",
+        (json.dumps(tariff.config()), now(conn), author),
+    ).fetchone()
+    return {"revision": row["id"], **tariff.config()}
+
+
+def active_tariff(conn) -> Tariff | None:
+    row = conn.execute(
+        "SELECT body FROM config_versions WHERE kind='tariff' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return Tariff.from_config(row["body"]) if row else None
+
+
+def _quote(tariff: Tariff | None, model, t):
+    if tariff is None:
+        return None
+    prices = tariff.price_for(model, t)
+    return {
+        "currency": tariff.currency,
+        "version": tariff.version,
+        "prices": [str(p) for p in prices] if prices is not None else None,
+    }
+
+
+def _priced(usage, quote, currency=None):
+    if currency and (
+        not isinstance(currency, str)
+        or len(currency) != 3
+        or not currency.isalpha()
+        or not currency.isupper()
+    ):
+        raise ApiError(422, "invalid", "cost_currency must be a three-letter currency code")
+    if currency and quote and quote["currency"] != currency:
+        raise ApiError(422, "currency_mismatch", "receipt currency differs from the admission currency")
+    prices = tuple(Decimal(p) for p in quote["prices"]) if quote and quote["prices"] is not None else None
+    cost = cost_from_prices(prices, usage)
+    if "cost_micro" in usage:
+        return usage, "explicit"
+    if cost is not None:
+        return {**usage, "cost_micro": cost}, "tariff"
+    return usage, "partial" if {"tokens_in", "tokens_out"} & usage.keys() else "unknown"
 
 
 def event(conn, t, kind, client_id=None, job_id=None, step_id=None, attempt_id=None, payload=None, corr=None):
@@ -294,6 +471,7 @@ def register_job(conn, client: dict, body: dict) -> dict:
     cjid = body["id"]
     steps = body["steps"]
     allowed = client["models"] or []
+    tariff = active_tariff(conn)
     jid = f"{client['id']}:{cjid}"
     existing = conn.execute("SELECT id FROM jobs WHERE id=%s", (jid,)).fetchone()
     if existing:
@@ -331,7 +509,10 @@ def register_job(conn, client: dict, body: dict) -> dict:
                 or not spec.applies(client["id"], model, provider)
             ):
                 continue
-            if spec.unit not in EXACT_UNITS and not (mx and spec.unit in tokens_total(mx)):
+            maximum = tokens_total(mx or {})
+            if tariff and spec.unit == "cost_micro":
+                maximum = tariff.with_cost(model, maximum, t)
+            if spec.unit not in EXACT_UNITS and spec.unit not in maximum:
                 cap_mode = "orientative"
                 warnings.append(
                     f"step {s['id']}: no enforceable maximum for {spec.unit}; {spec.id} is orientative"
@@ -434,15 +615,32 @@ def get_job(conn, client: dict, jid: str) -> dict:
     if not job or (job["client_id"] != client["id"] and client["role"] != "admin"):
         raise ApiError(404, "not_found", f"job {jid!r} not found")
     steps = conn.execute(
-        "SELECT step_id, state, attempts, ready_since, next_reconsider, last_reason, cap_mode FROM steps "
+        "SELECT step_id, state, attempts, ready_since, next_reconsider, last_reason, cap_mode, depends_on, "
+        "duration_estimate, model FROM steps "
         "WHERE job_id=%s ORDER BY step_id",
         (jid,),
     ).fetchall()
     attempts = conn.execute(
-        "SELECT id, step_id, n, state, granted_at, started_at, finished_at, status, usage FROM attempts "
+        "SELECT id, step_id, n, state, granted_at, started_at, finished_at, status, usage, admitted, "
+        "tariff_quote, cost_source, receipt FROM attempts "
         "WHERE job_id=%s ORDER BY granted_at, n",
         (jid,),
     ).fetchall()
+    from .investigate import historical_durations, job_risk
+
+    t = now(conn)
+    executor = conn.execute(
+        "SELECT slots,available_until FROM clients WHERE id=%s", (job["client_id"],)
+    ).fetchone()
+    starts = {a["step_id"]: a["started_at"] for a in attempts if a["state"] == "started"}
+    available = (
+        executor["available_until"] is not None
+        and executor["available_until"] >= t
+        and executor["slots"] > len(starts)
+    )
+    history = (
+        historical_durations(conn, job["cls"], {s["model"] for s in steps}, t) if job["deadline"] else {}
+    )
     return {
         **{
             k: job[k]
@@ -450,6 +648,11 @@ def get_job(conn, client: dict, jid: str) -> dict:
         },
         "steps": steps,
         "attempts": attempts,
+        "deadline_risk": job_risk(t, job, steps, starts, available, history),
+        "reproduction": {
+            "coverage": "partial",
+            "reason": "initial competing queue and window balances were not captured",
+        },
     }
 
 
@@ -505,11 +708,14 @@ def lock(conn) -> None:
 def _snapshot(conn, t: int) -> tuple[list[ResourceSpec], Capacity]:
     specs = load_resources(conn)
     ledger = Ledger(specs)
+    starts = [
+        t - s.length + 1 if s.window == "rolling" else s.window_start(t) if s.window == "calendar" else None
+        for s in specs
+    ]
     rows = conn.execute(
-        "SELECT l.* FROM ledger l JOIN resources r ON r.id=l.resource_id WHERE l.state <> 'released' "
-        # total windows and occupied concurrency slots count whatever their age
-        "AND (r.win IN ('total', 'concurrency') OR l.t > %s)",
-        (t - LOOKBACK,),
+        "SELECT l.* FROM ledger l JOIN unnest(%s::text[], %s::bigint[]) AS w(id, start) "
+        "ON l.resource_id=w.id WHERE l.state <> 'released' AND (w.start IS NULL OR l.t >= w.start)",
+        ([s.id for s in specs], starts),
     ).fetchall()
     for r in rows:
         ledger.add(
@@ -573,6 +779,22 @@ def schedule_pass(conn, t: int | None = None, focus: tuple[str, str, str] | None
     return _round(conn, t, focus=focus)
 
 
+def scheduler_heartbeat(conn, interval: float) -> None:
+    stamp = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
+    updated = conn.execute(
+        "UPDATE scheduler_windows SET completed_at=%s WHERE started_at=(SELECT max(started_at) FROM scheduler_windows) "
+        "AND completed_at >= %s - make_interval(secs=>greatest(5,3*%s))",
+        (stamp, stamp, interval),
+    )
+    if not updated.rowcount:
+        conn.execute("INSERT INTO scheduler_windows VALUES (%s,%s)", (stamp, stamp))
+    conn.execute(
+        "INSERT INTO scheduler_status (completed_at, interval_s) VALUES (%s,%s) "
+        "ON CONFLICT (singleton) DO UPDATE SET completed_at=EXCLUDED.completed_at, interval_s=EXCLUDED.interval_s",
+        (stamp, interval),
+    )
+
+
 def _round(
     conn,
     t: int,
@@ -587,6 +809,7 @@ def _round(
     """
     specs, cap = _snapshot(conn, t)
     policy, pol_version = load_policy(conn)
+    tariff = active_tariff(conn)
     label = policy.label + (f"/cfg{pol_version}" if pol_version else "")
     free: dict[str, int] = {}
     for c in conn.execute(
@@ -596,79 +819,40 @@ def _round(
     ).fetchall():
         free[c["id"]] = max(0, c["slots"] - int(c["busy"]))
     rows = conn.execute(
-        "SELECT s.*, j.client_id, j.cls, j.urgent, j.priority, j.arrival, j.deadline, j.seq "
-        "FROM steps s JOIN jobs j ON j.id=s.job_id WHERE j.state='active' ORDER BY j.seq, s.step_id"
+        "SELECT s.*, j.client_id, j.cls, j.urgent, j.priority, j.arrival, j.deadline, j.seq, a.started_at "
+        "FROM steps s JOIN jobs j ON j.id=s.job_id LEFT JOIN attempts a "
+        "ON s.state='running' AND a.job_id=s.job_id AND a.step_id=s.step_id AND a.state='started' "
+        "WHERE j.state='active' ORDER BY j.seq, s.step_id"
     ).fetchall()
-    by_job: dict[str, list[dict]] = {}
-    for r in rows:
-        by_job.setdefault(r["job_id"], []).append(r)
-    ready: list[ReadyItem] = []
-    demand: list[Demand] = []
-    step_rows: dict[tuple[str, str], dict] = {}
-    for jid, srows in by_job.items():
-        rem: dict[str, int] = {}
-        dur = 0
-        pending = []
-        for s in srows:
-            if s["state"] in ("waiting", "ready"):
-                amt = _admission(s)
-                for k, v in amt.items():
-                    rem[k] = rem.get(k, 0) + v
-                dur += int(s["duration_estimate"])
-                pending.append((s["model"], s["provider"], amt))
-        j0 = srows[0]
-        if rem:
-            demand.append(
-                Demand(
-                    jid,
-                    j0["urgent"],
-                    j0["deadline"],
-                    rem,
-                    remaining_duration=dur,
-                    by_resource=need_by_resource(specs, j0["client_id"], pending),
-                )
-            )
-        for s in srows:
-            target = only is not None and (jid, s["step_id"]) == only
-            if s["state"] != "ready" or (free.get(s["client_id"], 0) <= 0 and not target):
-                continue
-            if focus and s["client_id"] == focus[0] and (jid, s["step_id"]) != (focus[1], focus[2]):
-                continue
-            step_rows[(jid, s["step_id"])] = s
-            ready.append(
-                ReadyItem(
-                    job_id=jid,
-                    client=s["client_id"],
-                    cls=s["cls"],
-                    urgent=s["urgent"],
-                    priority=s["priority"],
-                    arrival=int(s["arrival"]),
-                    deadline=s["deadline"],
-                    step_id=s["step_id"],
-                    attempt=s["attempts"] + 1,
-                    ready_since=int(s["ready_since"] or t),
-                    need=_admission(s),
-                    remaining_need=rem,
-                    remaining_duration=dur,
-                    model=s["model"],
-                    seq=int(s["seq"]),
-                    provider=s["provider"],
-                )
-            )
+    ready, demand, dep_rows = _planning_rows(rows, t, tariff, free, only=only, focus=focus)
     if not ready:
         return [] if apply else None
+    cap.executors = free
+    if isinstance(policy, FairPolicy):
+        cap.turn = _fair_turn(conn, pol_version, policy.weights)
     decisions = decidir(t, ready, cap, policy, demand)
     if not apply:
         return next((d for d in decisions if (d.job_id, d.step_id) == only), None)
+    record_round(conn, t, ready, cap, policy, pol_version, demand, decisions)
     grants = []
+    ready_by_step = {(item.job_id, item.step_id): item for item in ready}
     for d in decisions:
-        s = step_rows[(d.job_id, d.step_id)]
         key = (d.job_id, d.step_id)
+        s = dep_rows[key]
         if d.action == Action.AUTHORIZE:
-            if free.get(s["client_id"], 0) <= 0:
-                continue  # authorized but the owner has no free executor this round
-            free[s["client_id"]] -= 1
-            grants.append(_grant(conn, t, s, d, label, specs))
+            grants.append(
+                _grant(
+                    conn,
+                    t,
+                    s,
+                    d,
+                    label,
+                    specs,
+                    urgent_for(t, ready_by_step[key], policy),
+                    tariff,
+                    pol_version,
+                )
+            )
         elif d.action == Action.CLOSE:
             conn.execute(
                 "UPDATE steps SET state='closed', last_reason=%s WHERE job_id=%s AND step_id=%s",
@@ -711,14 +895,104 @@ def _round(
     return grants
 
 
-def _admission(s: dict) -> dict[str, int]:
+def _planning_rows(rows, t, tariff, free, *, only=None, focus=None):
+    by_job: dict[str, list[dict]] = {}
+    for r in rows:
+        by_job.setdefault(r["job_id"], []).append(r)
+    ready: list[ReadyItem] = []
+    demand: list[Demand] = []
+    dep_rows: dict[tuple[str, str], dict] = {}
+    for jid, srows in by_job.items():
+        rem: dict[str, int] = {}
+        duration = {}
+        pending = []
+        for s in srows:
+            sid = s["step_id"]
+            if s["state"] in ("waiting", "ready"):
+                amount = _admission(s, tariff, t)
+                pending.append(StepDemand(sid, s["model"], amount, s.get("provider")))
+                for k, v in amount.items():
+                    rem[k] = rem.get(k, 0) + v
+                duration[sid] = int(s["duration_estimate"])
+            elif s["state"] == "running" and s["started_at"] is not None:
+                duration[sid] = max(0, int(s["duration_estimate"]) - (t - s["started_at"]))
+            elif s["state"] == "granted":
+                duration[sid] = int(s["duration_estimate"])
+        dur, _ = critical_path({s["step_id"]: tuple(s["depends_on"]) for s in srows}, duration)
+        j0 = srows[0]
+        if pending:
+            demand.append(
+                Demand(
+                    jid,
+                    j0["urgent"],
+                    j0["deadline"],
+                    rem,
+                    remaining_duration=dur,
+                    client=j0["client_id"],
+                    steps=tuple(pending),
+                )
+            )
+        for s in srows:
+            target = only is not None and (jid, s["step_id"]) == only
+            if s["state"] != "ready" or (free.get(s["client_id"], 0) <= 0 and not target):
+                continue
+            if focus and s["client_id"] == focus[0] and (jid, s["step_id"]) != (focus[1], focus[2]):
+                continue
+            dep_rows[(jid, s["step_id"])] = s
+            if target:
+                free[s["client_id"]] = max(1, free.get(s["client_id"], 0))
+            ready.append(
+                ReadyItem(
+                    job_id=jid,
+                    client=s["client_id"],
+                    cls=s["cls"],
+                    urgent=s["urgent"],
+                    priority=s["priority"],
+                    arrival=int(s["arrival"]),
+                    deadline=s["deadline"],
+                    step_id=s["step_id"],
+                    attempt=s["attempts"] + 1,
+                    ready_since=int(s["ready_since"] if s["ready_since"] is not None else t),
+                    need=_admission(s, tariff, t),
+                    remaining_need=rem,
+                    remaining_duration=dur,
+                    model=s["model"],
+                    seq=int(s["seq"]),
+                    provider=s.get("provider"),
+                )
+            )
+    return ready, demand, dep_rows
+
+
+def _fair_turn(conn, config, weights):
+    latest = conn.execute(
+        "SELECT client_id FROM attempts WHERE turn_config=%s AND (delivered OR state='granted') "
+        "ORDER BY turn_seq DESC LIMIT 1",
+        (config,),
+    ).fetchone()
+    if not latest:
+        return None
+    client = latest["client_id"]
+    if weights.get(client, 1) == 1:
+        return client, 1
+    count = conn.execute(
+        "SELECT count(*) AS n FROM attempts WHERE turn_config=%s AND (delivered OR state='granted') "
+        "AND turn_seq > coalesce((SELECT max(turn_seq) FROM attempts WHERE turn_config=%s "
+        "AND client_id<>%s AND (delivered OR state='granted')), 0)",
+        (config, config, client),
+    ).fetchone()["n"]
+    return client, ((count - 1) % weights.get(client, 1)) + 1
+
+
+def _admission(s: dict, tariff=None, t=None) -> dict[str, int]:
     amt = dict(s["estimate"])
     if s["maximum"]:
         amt.update(s["maximum"])
-    return tokens_total(amt)
+    amt = tokens_total(amt)
+    return tariff.with_cost(s["model"], amt, t) if tariff else amt
 
 
-def _grant(conn, t, s, d, label, specs) -> dict:
+def _grant(conn, t, s, d, label, specs, urgent, tariff, config) -> dict:
     n = (
         conn.execute(
             "SELECT count(*) AS c FROM attempts WHERE job_id=%s AND step_id=%s", (s["job_id"], s["step_id"])
@@ -726,20 +1000,31 @@ def _grant(conn, t, s, d, label, specs) -> dict:
         + 1
     )
     aid = str(uuid.uuid4())
-    admitted = _admission(s)
+    admitted = _admission(s, tariff, t)
     conn.execute(
-        "INSERT INTO attempts (id, job_id, step_id, n, client_id, state, admitted, granted_at, grant_expires_at) "
-        "VALUES (%s,%s,%s,%s,%s,'granted',%s,%s,%s)",
-        (aid, s["job_id"], s["step_id"], n, s["client_id"], json.dumps(admitted), t, t + GRANT_TTL),
+        "INSERT INTO attempts (id, job_id, step_id, n, client_id, state, admitted, granted_at, grant_expires_at, "
+        "tariff_quote, turn_config) VALUES (%s,%s,%s,%s,%s,'granted',%s,%s,%s,%s,%s)",
+        (
+            aid,
+            s["job_id"],
+            s["step_id"],
+            n,
+            s["client_id"],
+            json.dumps(admitted),
+            t,
+            t + GRANT_TTL,
+            json.dumps(_quote(tariff, s["model"], t)),
+            config if (d.value or {}).get("turn") else None,
+        ),
     )
     for spec in specs:
         if spec.applies(s["client_id"], s["model"], s["provider"]):
             amount = spec.need_of(admitted)
-            if amount:
+            if amount or spec.unit == "cost_micro":
                 conn.execute(
                     "INSERT INTO ledger (resource_id, t, amount, attempt_id, urgent, client_id, state, updated_at) "
                     "VALUES (%s,%s,%s,%s,%s,%s,'reserved',%s)",
-                    (spec.id, t, amount, aid, s["urgent"], s["client_id"], t),
+                    (spec.id, t, amount, aid, urgent, s["client_id"], t),
                 )
     conn.execute(
         "UPDATE steps SET state='granted', last_reason=%s, next_reconsider=NULL WHERE job_id=%s AND step_id=%s",
@@ -765,6 +1050,7 @@ def claim(
     lock(conn)
     t = now(conn)
     if shadow:
+        begun = time.perf_counter()
         if not (job and step):
             raise ApiError(422, "invalid", "a shadow claim names the job and step it observes")
         st = conn.execute(
@@ -787,11 +1073,22 @@ def claim(
             if d
             else {"action": "none", "reason": f"step is {st['state']}"}
         )
-        event(conn, t, "shadow_decision", client["id"], job, step, payload=would)
+        event(
+            conn,
+            t,
+            "shadow_decision",
+            client["id"],
+            job,
+            step,
+            payload={**would, "planner_latency_ms": round((time.perf_counter() - begun) * 1000, 3)},
+        )
         return {"permit": None, "shadow": would}
-    if slots is not None:
-        conn.execute("UPDATE clients SET slots=%s WHERE id=%s", (slots, client["id"]))
-    conn.execute("UPDATE clients SET available_until=%s WHERE id=%s", (t + EXECUTOR_TTL, client["id"]))
+    conn.execute(
+        "UPDATE clients SET slots=coalesce(%(slots)s::integer,slots), available_until=%(until)s, last_claim_at=%(t)s, "
+        "last_slot_claim_at=CASE WHEN coalesce(%(slots)s::integer,slots)>0 THEN %(t)s ELSE last_slot_claim_at END "
+        "WHERE id=%(client)s",
+        {"slots": slots, "until": t + EXECUTOR_TTL, "t": t, "client": client["id"]},
+    )
     if job and step:
         # A worker asking for one specific step: permits the background planner granted to
         # this client for other steps were never handed to anyone; give their slot back.
@@ -810,14 +1107,19 @@ def claim(
             )
     schedule_pass(conn, t, focus=(client["id"], job, step) if job and step else None)
     a = conn.execute(
-        "SELECT a.*, s.model, s.provider, s.maximum, s.estimate FROM attempts a JOIN steps s ON s.job_id=a.job_id AND s.step_id=a.step_id "
+        "SELECT a.*, s.model, s.provider, s.maximum, s.estimate, s.ready_since FROM attempts a "
+        "JOIN steps s ON s.job_id=a.job_id AND s.step_id=a.step_id "
         "WHERE a.client_id=%s AND a.state='granted' AND NOT a.delivered AND a.grant_expires_at > %s "
         "AND (%s::text IS NULL OR a.job_id=%s) AND (%s::text IS NULL OR a.step_id=%s) "
-        "ORDER BY a.granted_at, a.id LIMIT 1 FOR UPDATE OF a SKIP LOCKED",
+        "ORDER BY a.granted_at, a.turn_seq LIMIT 1 FOR UPDATE OF a SKIP LOCKED",
         (client["id"], t, job, job, step, step),
     ).fetchone()
     if a:
-        conn.execute("UPDATE attempts SET delivered=true WHERE id=%s", (a["id"],))
+        conn.execute(
+            "UPDATE attempts SET delivered=true,delivered_at=%s,ready_at_delivery=%s WHERE id=%s",
+            (t, a["ready_since"], a["id"]),
+        )
+        event(conn, t, "permit_delivered", client["id"], a["job_id"], a["step_id"], a["id"])
         return {
             "permit": {
                 "attempt": a["id"],
@@ -862,6 +1164,10 @@ def observe(conn, client: dict, body: dict) -> dict:
         raise ApiError(404, "not_found", f"step {jid}/{sid} not found")
     status = body.get("status", "ok")
     usage = tokens_total(_amounts(body.get("usage"), "usage"))
+    quote = _quote(active_tariff(conn), s["model"], body.get("started_at", t))
+    usage, source = _priced(usage, quote, body.get("cost_currency"))
+    if quote is None and source == "explicit" and body.get("cost_currency"):
+        quote = {"currency": body["cost_currency"], "prices": None}
     n = (
         conn.execute(
             "SELECT count(*) AS c FROM attempts WHERE job_id=%s AND step_id=%s", (jid, sid)
@@ -888,6 +1194,9 @@ def observe(conn, client: dict, body: dict) -> dict:
             json.dumps(usage),
             body.get("receipt"),
         ),
+    )
+    conn.execute(
+        "UPDATE attempts SET tariff_quote=%s,cost_source=%s WHERE id=%s", (json.dumps(quote), source, aid)
     )
     for spec in load_resources(conn):
         if spec.window != "concurrency" and spec.applies(client["id"], s["model"], s["provider"]):
@@ -956,7 +1265,8 @@ def _settle(conn, t, a, usage: dict | None, state: str) -> None:
                 (int(u[r["unit"]]), state, t, r["id"]),
             )
         else:
-            conn.execute("UPDATE ledger SET state=%s, updated_at=%s WHERE id=%s", (state, t, r["id"]))
+            final = "unknown" if r["unit"] == "cost_micro" else state
+            conn.execute("UPDATE ledger SET state=%s, updated_at=%s WHERE id=%s", (final, t, r["id"]))
 
 
 def finish(conn, client, aid, body: dict) -> dict:
@@ -974,10 +1284,15 @@ def finish(conn, client, aid, body: dict) -> dict:
     if status not in ("ok", "invalid", "rate_limited", "error"):
         raise ApiError(422, "invalid", "status must be ok, invalid, rate_limited or error")
     usage = _amounts(body.get("usage"), "usage")
+    quote = a["tariff_quote"]
+    usage, source = _priced(usage, quote, body.get("cost_currency"))
+    if quote is None and source == "explicit" and body.get("cost_currency"):
+        quote = {"currency": body["cost_currency"], "prices": None}
     _settle(conn, t, a, usage, "confirmed")
     conn.execute(
-        "UPDATE attempts SET state='finished', finished_at=%s, status=%s, usage=%s, receipt=%s, finish_request=%s WHERE id=%s",
-        (t, status, json.dumps(usage), body.get("receipt"), h, aid),
+        "UPDATE attempts SET state='finished', finished_at=%s, status=%s, usage=%s, receipt=%s, finish_request=%s, "
+        "tariff_quote=%s,cost_source=%s WHERE id=%s",
+        (t, status, json.dumps(usage), body.get("receipt"), h, json.dumps(quote), source, aid),
     )
     _after_outcome(conn, t, a, status, body.get("retry_after"))
     event(
@@ -1047,15 +1362,21 @@ def reconcile(conn, client, aid, body: dict) -> dict:
     if a["state"] not in ("unknown", "started"):
         raise ApiError(409, "not_uncertain", f"attempt is {a['state']}; nothing to reconcile")
     consumed = bool(body.get("consumed"))
-    evidence = body.get("receipt") or body.get("evidence") or "none"
+    evidence = body.get("receipt") or body.get("evidence")
+    if client["role"] == "admin" and (not isinstance(evidence, str) or not evidence.strip()):
+        raise ApiError(422, "evidence_required", "provide a receipt identifier or verifiable evidence")
+    evidence = evidence or "none"
     if consumed:
         status = body.get("status", "ok")
-        usage = _amounts(body.get("usage"), "usage") or None
+        quote = a["tariff_quote"]
+        usage, source = _priced(_amounts(body.get("usage"), "usage"), quote, body.get("cost_currency"))
+        if quote is None and source == "explicit" and body.get("cost_currency"):
+            quote = {"currency": body["cost_currency"], "prices": None}
         _settle(conn, t, a, usage, "confirmed")  # without usage the conservative admitted amount stays
         conn.execute(
             "UPDATE attempts SET state='reconciled', finished_at=%s, status=%s, usage=%s, receipt=%s, "
-            "finish_request=%s WHERE id=%s",
-            (t, status, json.dumps(usage or {}), body.get("receipt"), h, aid),
+            "finish_request=%s,tariff_quote=%s,cost_source=%s WHERE id=%s",
+            (t, status, json.dumps(usage), body.get("receipt"), h, json.dumps(quote), source, aid),
         )
         _after_outcome(conn, t, a, status)
     else:
@@ -1085,7 +1406,8 @@ def reconcile(conn, client, aid, body: dict) -> dict:
 
 def _attempt_view(conn, aid) -> dict:
     a = conn.execute(
-        "SELECT id, job_id, step_id, n, state, status, usage, started_at, finished_at FROM attempts WHERE id=%s",
+        "SELECT id, job_id, step_id, n, state, status, usage, started_at, finished_at, tariff_quote, cost_source "
+        "FROM attempts WHERE id=%s",
         (aid,),
     ).fetchone()
     return {
@@ -1098,6 +1420,8 @@ def _attempt_view(conn, aid) -> dict:
         "usage": a["usage"],
         "started_at": a["started_at"],
         "finished_at": a["finished_at"],
+        "tariff": a["tariff_quote"],
+        "cost_source": a["cost_source"],
     }
 
 
@@ -1126,7 +1450,7 @@ def usage(conn, client) -> dict:
             "capacity": s.capacity,
             "used": cap.ledger.used(s.id, t),
             "available": cap.ledger.available(s.id, t),
-            "unknown": sum(e.amount for e in cap.ledger.entries[s.id] if e.state == "unknown"),
+            "unknown": sum(e.amount for e in cap.ledger._live(s.id, t) if e.state == "unknown"),
         }
         for s in specs
     ]
@@ -1173,7 +1497,14 @@ def set_mode(conn, admin: dict, cid: str, mode: str) -> dict:
     return {"client": cid, "mode": mode, "changed_at": t}
 
 
-EXAMPLE_TOKENS = ("admin-local-token", "radar-local-token", "citalab-local-token")
+EXAMPLE_TOKENS = (
+    "admin-local-token",
+    "radar-local-token",
+    "citalab-local-token",
+    "demo-admin-local",
+    "demo-radar-local",
+    "demo-citalab-local",
+)
 
 
 def example_token_clients(conn) -> list[str]:
@@ -1202,6 +1533,9 @@ def overview(conn, decisions_limit: int = 60) -> dict:
                 "window": s.window,
                 "capacity": s.capacity,
                 "scope": s.scope,
+                "reset_tz": s.reset_tz,
+                "calendar_period": s.calendar_period,
+                "alert_at": s.alert_at,
                 "used": cap.ledger.used(s.id, t),
                 "available": cap.ledger.available(s.id, t),
                 "used_urgent": cap.ledger.used(s.id, t, urgent=True),
@@ -1210,7 +1544,8 @@ def overview(conn, decisions_limit: int = 60) -> dict:
             }
         )
     clients = conn.execute(
-        "SELECT id, mode, mode_changed_at, slots, available_until FROM clients WHERE role='client' ORDER BY id"
+        "SELECT id, mode, mode_changed_at, slots, available_until, last_claim_at, last_slot_claim_at "
+        "FROM clients WHERE role='client' ORDER BY id"
     ).fetchall()
     queue = conn.execute(
         "SELECT j.client_id, s.state, count(*) AS n, min(s.ready_since) AS oldest FROM steps s "
@@ -1245,8 +1580,33 @@ def overview(conn, decisions_limit: int = 60) -> dict:
         "WHERE kind='shadow_decision' AND t > %s GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC",
         (t - 86400,),
     ).fetchall()
+    from ..shadow import trial_verdict
+
+    observations = conn.execute(
+        "WITH rows AS (SELECT client_id,kind,payload FROM events WHERE kind IN ('shadow_decision','observed') "
+        "AND t>%s) SELECT client_id,count(*) FILTER (WHERE kind='observed') AS observed,"
+        "count(*) FILTER (WHERE kind='shadow_decision') AS decisions,"
+        "percentile_disc(0.5) WITHIN GROUP (ORDER BY (payload->>'planner_latency_ms')::double precision) AS p50,"
+        "percentile_disc(0.95) WITHIN GROUP (ORDER BY (payload->>'planner_latency_ms')::double precision) AS p95 "
+        "FROM rows GROUP BY client_id",
+        (t - 86400,),
+    ).fetchall()
+    shadow_evidence = [
+        {
+            **row,
+            "verdict": trial_verdict(
+                calls=max(row["observed"], row["decisions"]),
+                days=1,
+                responses=row["decisions"],
+                latency_p95=None,
+            ),
+        }
+        for row in observations
+    ]
     return {
         "shadow_24h": shadow,
+        "shadow_evidence": shadow_evidence,
+        "environment": os.environ.get("RUBATO_ENVIRONMENT", "habitual"),
         "example_tokens": example_token_clients(conn),
         "t": t,
         "resources": resources,
@@ -1258,7 +1618,48 @@ def overview(conn, decisions_limit: int = 60) -> dict:
         "unknown_attempts": unknown,
         "pauses": pauses,
         "policy": {"label": policy.label, "version": version, "config": policy.config()},
+        "fair_turns": _fair_turn_report(conn, t, policy, version, clients)
+        if isinstance(policy, FairPolicy)
+        else None,
         "jobs_last_24h": {r["state"]: r["n"] for r in totals},
+    }
+
+
+def _fair_turn_report(conn, t, policy, revision, clients):
+    since = t - 86400
+    rows = conn.execute(
+        "SELECT client_id,count(*) AS delivered,count(ready_at_delivery) AS wait_samples, "
+        "percentile_disc(0.95) WITHIN GROUP (ORDER BY greatest(0,delivered_at-ready_at_delivery)) "
+        "FILTER (WHERE ready_at_delivery IS NOT NULL) AS wait_p95_s "
+        "FROM attempts WHERE turn_config=%s AND delivered_at BETWEEN %s AND %s GROUP BY client_id",
+        (revision, since, t),
+    ).fetchall()
+    counts = {r["client_id"]: r for r in rows}
+    legacy = conn.execute(
+        "SELECT count(*) AS n FROM attempts WHERE turn_config=%s AND delivered AND delivered_at IS NULL "
+        "AND granted_at BETWEEN %s AND %s",
+        (revision, since, t),
+    ).fetchone()["n"]
+    return {
+        "since": since,
+        "as_of": t,
+        "revision": revision,
+        "resource": policy.resource,
+        "legacy_deliveries_without_timestamp": legacy,
+        "clients": [
+            {
+                "client_id": c["id"],
+                "delivered": 0,
+                "wait_samples": 0,
+                "wait_p95_s": None,
+                **counts.get(c["id"], {}),
+                "weight": policy.weights.get(c["id"], 1),
+                "requested": c["last_claim_at"] is not None and since <= c["last_claim_at"] <= t,
+                "requested_slots": c["last_slot_claim_at"] is not None
+                and since <= c["last_slot_claim_at"] <= t,
+            }
+            for c in clients
+        ],
     }
 
 

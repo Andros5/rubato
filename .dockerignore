@@ -2,6 +2,13 @@
 .git
 private
 runs
+output
+.playwright-cli
+.claude
+.codex
+CLAUDE.md
+AGENTS.md
+docs/desarrollo
 **/__pycache__
 *.db
 *.sqlite

@@ -23,6 +23,8 @@ comandos a mano). Duración aproximada por bloque entre corchetes.
    que se reconsiderarán al reinicio de la cuota. La política por defecto sigue siendo
    la referencia, porque en el historial real la reserva empató.»
 
-Variante con servicio: `docker compose --profile demo up --build -d` y `rubato demo-service` (dos
+Variante con servicio, en el proyecto aparte de entrevista: `docker compose --env-file config/entrevista-compose.example.vars -p rubato-entrevista --profile ha --profile demo up --build -d --wait`
+y `rubato demo-service --api http://127.0.0.1:18700 --provider http://127.0.0.1:18710
+--admin-token demo-admin-local --radar-token demo-radar-local --citalab-token demo-citalab-local` (dos
 clientes, cuota 24, la candidatura llega al final; con reserva termina y un episodio de
 CitaLab queda pendiente).

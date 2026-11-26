@@ -38,6 +38,7 @@ def run(stop: threading.Event, interval: float | None = None) -> None:
                     t0 = time.perf_counter()
                     with conn.transaction():
                         grants = store.schedule_pass(conn)
+                        store.scheduler_heartbeat(conn, interval)
                     if grants:
                         log.info(
                             json.dumps(

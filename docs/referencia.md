@@ -20,6 +20,8 @@
 Políticas: `fifo` (orden de llegada), `radar` (prioridad y elegibilidad, referencia),
 `reserva` (`reserve` por recurso o patrón `rpd:*`, `release_at` / `release_offset`,
 `aging_limit`, `impossible` = `run` | `background` | `drop`).
+`fair` añade `resource` y `weights`. La versión `fair@2` incluye los pasos degradados a fondo
+en la rotación del cliente.
 
 ## API HTTP (token `Authorization: Bearer …`)
 
@@ -28,7 +30,7 @@ Políticas: `fifo` (orden de llegada), `radar` (prioridad y elegibilidad, refere
 | `POST /v1/jobs` | Registra `{id, class, urgent, priority, deadline?, meta?, steps:[{id, model, provider?, estimate, maximum?, depends_on?, duration_estimate?, max_attempts?}]}`. Idempotente por `Idempotency-Key` (por defecto `job:<id>`); misma clave con otro cuerpo → 409. Avisa si un tope estricto queda `orientative`. |
 | `GET /v1/jobs/{id}` | Estado del trabajo, pasos e intentos (solo los propios). |
 | `POST /v1/jobs/{id}/cancel` | Cierra pasos futuros; libera permisos no iniciados. |
-| `POST /v1/claims` | `{slots?, job?, step?, shadow?}` → `{permit:{attempt, job, step, model, provider, admitted, start_before}}` o `{permit:null, retry_after, next_reconsider, step:{state,last_reason}}`. Con `shadow:true` devuelve la decisión que tomaría sin reservar. |
+| `POST /v1/claims` | `{slots?, job?, step?, shadow?}` → `{permit:{attempt, job, step, model, provider, admitted, start_before}}` o `{permit:null, retry_after, next_reconsider, step:{state,last_reason}}`. Acepta `Idempotency-Key` por solicitud lógica. Con `shadow:true` devuelve la decisión que tomaría sin reservar. |
 | `POST /v1/attempts/{id}/start` | Obligatorio antes de llamar al proveedor. `409 permit_expired` si caducó. Idempotente. |
 | `POST /v1/attempts/{id}/finish` | `{status: ok|invalid|rate_limited|error, usage, receipt?, retry_after?}`. Repetir con el mismo cuerpo devuelve lo mismo; con otro, 409. |
 | `POST /v1/attempts/{id}/reconcile` | `{consumed, usage?, receipt?, evidence?}` para intentos `unknown`. |
@@ -49,5 +51,5 @@ Políticas: `fifo` (orden de llegada), `radar` (prioridad y elegibilidad, refere
 
 Variables: `RUBATO_DSN`, `RUBATO_CLIENTS` (`id:token:rol:ranuras,…`),
 `RUBATO_GRANT_TTL` (60), `RUBATO_ATTEMPT_TIMEOUT` (600), `RUBATO_EXECUTOR_TTL` (120),
-`RUBATO_LEDGER_LOOKBACK` (3 días), `RUBATO_MIGRATE` (1), `RUBATO_POOL` (10),
+`RUBATO_MIGRATE` (1), `RUBATO_POOL` (10),
 `RUBATO_SCHEDULER_INTERVAL` (2 s).

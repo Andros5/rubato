@@ -1,7 +1,8 @@
 # Servicio de admisión (F5)
 
 `docker compose up --build` levanta PostgreSQL 17, la API (FastAPI, 1 worker) y el
-planificador en segundo plano; `--profile demo` añade un proveedor simulado con recibos.
+planificador en segundo plano. El proveedor simulado con recibos está en el perfil `demo`,
+que solo usan los proyectos aparte de entrevista y ensayo ([laboratorio](laboratorio.md)).
 Todo local, sin claves reales. Tokens de ejemplo en `compose.yaml` (`radar-local-token`,
 `citalab-local-token`, `admin-local-token`): son solo para el entorno local.
 
@@ -12,6 +13,11 @@ Todo local, sin claves reales. Tokens de ejemplo en `compose.yaml` (`radar-local
 2. `POST /v1/claims {"slots": n, "job"?, "step"?}` declara ejecutores disponibles,
    ejecuta una ronda de admisión (la misma `core.decidir` que el simulador) y devuelve
    un permiso propio o `retry_after` y el último motivo.
+   Si se pierde la respuesta, repite el mismo cuerpo con la misma cabecera
+   `Idempotency-Key`. La otra réplica puede devolver la respuesta guardada. Usa una
+   clave nueva cuando hagas una consulta posterior. En Python, pasa `key` a
+   `RubatoClient.claim`. Si el permiso recuperado ya caducó, el paso 3 responde
+   con `permit_expired`.
 3. `POST /v1/attempts/{id}/start` **antes** de llamar al proveedor. Si el permiso
    caducó, responde `409 permit_expired` y el cliente no llama.
 4. `POST /v1/attempts/{id}/finish {status, usage, receipt, retry_after?}` liquida.

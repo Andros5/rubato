@@ -36,15 +36,12 @@ def test_migration_from_previous_schema_keeps_data():
                     "VALUES ('radar:before-upgrade', 's', '{\"requests\": 1}', 'ready')"
                 )
             assert db.schema_version(conn) == "0001_init.sql"
-            assert db.migrate(conn) == [
-                "0002_meta_and_audit_idx.sql",
-                "0003_client_mode.sql",
-                "0004_step_provider.sql",
-            ]
+            assert db.migrate(conn) == [name for name, _ in db.migration_files()][1:]
+            assert conn.execute("SELECT provider FROM steps").fetchone() == {"provider": None}
             row = conn.execute("SELECT id, state, meta FROM jobs").fetchone()
             assert row == {"id": "radar:before-upgrade", "state": "active", "meta": {}}
             assert db.migrate(conn) == []  # idempotent
-            assert db.schema_version(conn) == "0004_step_provider.sql"
+            assert db.schema_version(conn) == db.migration_files()[-1][0]
     finally:
         with psycopg.connect(DSN, autocommit=True) as admin:
             admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
@@ -71,7 +68,7 @@ def test_metrics_cover_queue_permits_reasons_and_ledger_without_job_labels():
         assert f"# TYPE {name}" in text
     assert 'reason="capacity_exhausted"' in text
     assert "metric-a" not in text and "metric-b" not in text and "job=" not in text
-    assert ok(httpx.get(f"{API}/readyz"))["schema"] == "0004_step_provider.sql"
+    assert ok(httpx.get(f"{API}/readyz"))["schema"] == db.migration_files()[-1][0]
 
 
 @needs_service
@@ -81,14 +78,25 @@ def test_correlation_id_is_echoed():
 
 
 @pytest.mark.skipif(not DSN, reason="set RUBATO_TEST_DSN to a disposable PostgreSQL")
-def test_upgraded_database_keeps_scheduling_old_jobs():
+@pytest.mark.parametrize("early_120", [False, True], ids=["initial", "early-1.2.0"])
+def test_upgraded_database_keeps_scheduling_old_jobs(early_120):
     name = f"mig_{uuid.uuid4().hex[:8]}"
     with psycopg.connect(DSN, autocommit=True) as admin:
         admin.execute(f"CREATE DATABASE {name}")
     url = DSN.rsplit("/", 1)[0] + "/" + name
     try:
         with db.connect(url) as conn:
-            db.migrate(conn, upto="0001_init.sql")
+            db.migrate(conn, upto="0003_client_mode.sql" if early_120 else "0001_init.sql")
+            if early_120:
+                for canonical, sql in db.migration_files():
+                    if canonical not in db.LEGACY_NAMES:
+                        continue
+                    with conn.transaction():
+                        conn.execute(sql)
+                        conn.execute(
+                            "INSERT INTO schema_migrations (name, applied_at) VALUES (%s, '2026-11-24 UTC')",
+                            (db.LEGACY_NAMES[canonical],),
+                        )
             with conn.transaction():
                 store.bootstrap_clients(conn, "radar:tok")
                 conn.execute(
@@ -99,11 +107,22 @@ def test_upgraded_database_keeps_scheduling_old_jobs():
                     "INSERT INTO steps (job_id, step_id, estimate, state, ready_since) "
                     "VALUES ('radar:old', 's', '{\"requests\": 1}', 'ready', 1)"
                 )
-            db.migrate(conn)
+            applied = db.migrate(conn)
+            if early_120:
+                assert applied == ["0004_step_provider.sql"]
+                applied_at = {
+                    row["name"]: row["applied_at"]
+                    for row in conn.execute("SELECT name, applied_at FROM schema_migrations")
+                }
+                assert all(applied_at[new] == applied_at[old] for new, old in db.LEGACY_NAMES.items())
+                conn.commit()
+            assert db.migrate(conn) == []
+            assert db.schema_version(conn) == db.migration_files()[-1][0]
             with conn.transaction():
                 c = conn.execute("SELECT * FROM clients WHERE id='radar'").fetchone()
                 r = store.claim(conn, c)
             assert r["permit"]["job"] == "radar:old"
+            assert r["permit"]["provider"] is None
     finally:
         with psycopg.connect(DSN, autocommit=True) as admin:
             admin.execute(f"DROP DATABASE {name} WITH (FORCE)")

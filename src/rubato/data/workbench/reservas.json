@@ -1,0 +1,8 @@
+{
+  "schema": "rubato.explore/v1",
+  "reference": "radar",
+  "candidate": "reserva",
+  "at_offset_s": 0,
+  "vary": {"kind": "reserve", "resource": "rpd", "values": [0, 2, 4, 8]},
+  "goals": {"min_urgent_on_time": 1, "min_background_done": 70, "max_background_wait_p95_s": 300}
+}

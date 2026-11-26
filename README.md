@@ -86,6 +86,10 @@ is never retried blindly.
 
 ## Quick start
 
+On Windows, open `Rubato.pyw` from the checkout for the local launcher. It can start the isolated
+demo stack and open scenario reports while Docker is stopped. See the [capacity lab](docs/laboratorio.md)
+for the offline comparison, CSV import, policy revisions, and reproducible demo commands.
+
 ### Simulator (no keys, no network)
 
 ```bash
@@ -114,7 +118,7 @@ analyses pay for it, and the report shows that cost rather than hiding it:
 
 ```bash
 docker compose up --build -d                 # PostgreSQL, API and planner (~120 MB of RAM)
-docker compose --profile demo up -d          # adds the simulated provider for demos and tests
+# the simulated provider runs only in the separate interview project (docs/laboratorio.md)
 # open http://127.0.0.1:8000/panel          (admin token from RUBATO_CLIENTS)
 rubato status --token <admin-token>          # the same view in the terminal
 rubato why radar:<job-id> --token <admin-token>   # every decision about a live job
@@ -196,8 +200,7 @@ tests/           behaviour tests (simulator, service on real PostgreSQL, adapter
 ```bash
 pip install -e ".[dev]"
 pytest -q                                                      # no network, no keys
-RUBATO_TEST_CLOCK=1 docker compose --profile demo up -d --build
-RUBATO_TEST_API=http://127.0.0.1:8000 pytest -q -m postgres   # service on real PostgreSQL
+# service on real PostgreSQL: separate trial project with the simulated provider, see CONTRIBUTING.md
 ruff check src tests scripts && ruff format --check src tests scripts
 ```
 

@@ -84,14 +84,14 @@ def what_if(base: SimResult, alt: SimResult) -> dict:
 def winners(summaries: dict[str, dict]) -> dict[str, list[str]]:
     """Who is best on each objective. Ties list every policy; nothing is averaged."""
     objectives = {
-        "urgent_on_time": lambda m: m["urgent"]["done_on_time"],
-        "background_on_time": lambda m: m["background"]["done_on_time"],
-        "background_done": lambda m: m["background"]["done"],
-        "background_wait_p95 (lower)": lambda m: -(m["background"]["wait_p95"] or 0),
+        "urgent_on_time": ("urgent", "done_on_time", max),
+        "background_on_time": ("background", "done_on_time", max),
+        "background_done": ("background", "done", max),
+        "background_wait_p95 (lower)": ("background", "wait_p95", min),
     }
     out = {}
-    for name, f in objectives.items():
-        vals = {p: f(m) for p, m in summaries.items()}
-        best = max(vals.values())
+    for name, (group, field, pick) in objectives.items():
+        vals = {p: value for p, m in summaries.items() if (value := m[group][field]) is not None}
+        best = pick(vals.values(), default=None)
         out[name] = sorted(p for p, v in vals.items() if v == best)
     return out

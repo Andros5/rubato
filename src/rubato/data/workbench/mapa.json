@@ -1,0 +1,13 @@
+{
+  "delimiter": ",",
+  "timezone": "Europe/Madrid",
+  "arrival_from_start": true,
+  "duration_estimate_s": 4,
+  "estimate": {"tokens_in": 2000, "tokens_out": 600},
+  "columns": {
+    "client": "cliente", "job": "trabajo", "step": "paso", "attempt": "intento",
+    "arrival": "llegada", "start": "inicio", "end": "fin", "model": "modelo",
+    "status": "estado", "tokens_in": "entrada", "tokens_out": "salida", "depends_on": "dependencias"
+  },
+  "resources": [{"id": "rpd", "unit": "requests", "capacity": 4, "window": "calendar", "reset_tz": "Europe/Madrid"}]
+}

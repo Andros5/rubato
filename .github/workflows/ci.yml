@@ -24,24 +24,39 @@ jobs:
       - run: python -m ruff format --check src tests scripts
       - run: python -m pytest -q
 
-  # Service and migration tests against the real stack (PostgreSQL, API, scheduler,
-  # simulated provider), the same Compose setup CONTRIBUTING.md uses locally.
+  # Service and migration tests on the isolated interview Compose stack.
   postgres:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
-      RUBATO_TEST_CLOCK: "1"
+      RUBATO_TEST_API: http://127.0.0.1:18700
+      RUBATO_TEST_PROVIDER: http://127.0.0.1:18710
       RUBATO_TEST_COMPOSE: "1"
-      RUBATO_TEST_API: http://127.0.0.1:8000
-      RUBATO_TEST_DSN: postgresql://rubato:rubato-local-only@127.0.0.1:55432/rubato
+      RUBATO_TEST_DSN: postgresql://rubato:rubato-demo-only@127.0.0.1:56432/rubato
+      RUBATO_TEST_ADMIN_TOKEN: demo-admin-local
+      RUBATO_TEST_RADAR_TOKEN: demo-radar-local
+      RUBATO_TEST_CITALAB_TOKEN: demo-citalab-local
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: python -m pip install -e ".[dev]"
-      - run: docker compose --profile demo up -d --build --wait --wait-timeout 180
-      - run: python -m pytest -q -rs -m postgres
+      - run: |
+          docker compose --env-file config/entrevista-compose.example.vars -p rubato-entrevista --profile ha --profile demo build api
+          docker compose --env-file config/entrevista-compose.example.vars -p rubato-entrevista --profile ha --profile demo up -d --wait --wait-timeout 90
+      - run: |
+          python -m pytest -q -m postgres --junitxml=integration.xml
+          python - <<'PY'
+          from xml.etree import ElementTree
+          cases = ElementTree.parse("integration.xml").findall(".//testcase")
+          skipped = [case.attrib["name"] for case in cases if case.find("skipped") is not None]
+          if len(cases) < 41 or skipped:
+              raise SystemExit(f"Expected at least 41 PostgreSQL cases. Executed {len(cases)}, skipped: {skipped}")
+          PY
+      - run: python scripts/ops/ha_drill.py --out runs/ci/drill.json
+      - run: python scripts/ops/benchmark.py --out runs/ci/benchmark.json --jobs 2 --repetitions 1
       - if: failure()
-        run: docker compose --profile demo logs --no-color
+        run: docker compose --env-file config/entrevista-compose.example.vars -p rubato-entrevista --profile ha --profile demo logs --no-color
       - if: always()
-        run: docker compose --profile demo down -v
+        run: docker compose --env-file config/entrevista-compose.example.vars -p rubato-entrevista --profile ha --profile demo down -v
