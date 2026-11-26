@@ -45,7 +45,7 @@ def _steps(jobs: Sequence[Job], resources: Sequence[ResourceSpec]) -> list[OptSt
         for s in j.steps:
             o, _ = s.outcome(1)
             amount = {**s.admission_amount()}
-            need = {r.id: r.need_of(amount) for r in resources if r.applies(j.client, s.model)}
+            need = {r.id: r.need_of(amount) for r in resources if r.applies(j.client, s.model, s.provider)}
             out.append(
                 OptStep(
                     (j.id, s.id),

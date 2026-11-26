@@ -4,7 +4,7 @@ Events (schema ``rubato.capture/v1``), one JSON object per line:
 
 * ``job_enqueued``    job, client, class, urgent, priority, deadline (optional)
 * ``step_ready``      job, step, depends_on
-* ``attempt_started`` job, step, attempt, model, estimate
+* ``attempt_started`` job, step, attempt, model, provider (optional), estimate
 * ``attempt_finished`` job, step, attempt, status, usage, duration_ms
 
 Every event has ``t`` (epoch seconds, float), ``corr`` (correlation id) and only
@@ -34,7 +34,7 @@ KINDS = ("job_enqueued", "step_ready", "attempt_started", "attempt_finished")
 ALLOWED = {
     "job_enqueued": {"job", "client", "class", "urgent", "priority", "deadline"},
     "step_ready": {"job", "step", "depends_on"},
-    "attempt_started": {"job", "step", "attempt", "model", "estimate"},
+    "attempt_started": {"job", "step", "attempt", "model", "provider", "estimate"},
     "attempt_finished": {"job", "step", "attempt", "status", "usage", "duration_ms"},
 }
 log = logging.getLogger("rubato.capture")
@@ -102,7 +102,7 @@ def to_trace(events: list[dict], estimates: dict[str, dict[str, int]] | None = N
         elif e["kind"] == "attempt_started":
             st = steps[j].setdefault(e["step"], {"depends_on": [], "attempts": {}})
             st["attempts"].setdefault(e["attempt"], {}).update(
-                start=e["t"], model=e.get("model"), estimate=e.get("estimate")
+                start=e["t"], model=e.get("model"), provider=e.get("provider"), estimate=e.get("estimate")
             )
         elif e["kind"] == "attempt_finished":
             st = steps[j].setdefault(e["step"], {"depends_on": [], "attempts": {}})
@@ -117,9 +117,10 @@ def to_trace(events: list[dict], estimates: dict[str, dict[str, int]] | None = N
     for jid, je in jobs.items():
         st_objs = []
         for sid, st in steps[jid].items():
-            outs, model, estimate = [], None, None
+            outs, model, provider, estimate = [], None, None, None
             for _, a in sorted(st["attempts"].items()):
                 model = model or a.get("model")
+                provider = provider or a.get("provider")
                 estimate = estimate or a.get("estimate")
                 if "finish" not in a:
                     unfinished += 1
@@ -142,6 +143,7 @@ def to_trace(events: list[dict], estimates: dict[str, dict[str, int]] | None = N
                     max(1, outs[0].duration if outs else 1),
                     max(1, len(outs)),
                     tuple(outs),
+                    provider,
                 )
             )
         if not st_objs:

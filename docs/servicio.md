@@ -38,7 +38,7 @@ claves reales. Tokens de ejemplo en `compose.yaml` (`radar-local-token`,
   reintenta hasta conciliar.
 - Topes estrictos: `requests` y `concurrent` son exactos; para tokens o dinero el paso
   necesita `maximum`, si no se registra como `orientative` con aviso (D7).
-- 429: `finish` con `status=rate_limited` y `retry_after` pausa el modelo (D8).
+- 429: `finish` con `status=rate_limited` y `retry_after` pausa el modelo, o el proveedor si el paso no declara modelo (D8).
 - Modo de prueba solo con `RUBATO_TEST_CLOCK=1` (pruebas de integración y demos); por
   defecto Compose arranca en modo normal, sin `reset` ni reloj manipulable.
 - Política por defecto: `radar@1` (veredicto de F4). El administrador puede activar

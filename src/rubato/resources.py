@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 NEVER = -1  # sentinel for next_available: it will never fit under current rules
 
 WINDOW_KINDS = ("rolling", "calendar", "concurrency", "total")
+SCOPE_KEYS = ("provider", "model", "client")
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,9 @@ class ResourceSpec:
     length: int | None = None  # rolling length or calendar period in time units
     reset_tz: str | None = None  # calendar: daily reset at local midnight in this zone (times = epoch s)
     offset: int = 0  # calendar without tz: windows start at offset + k*length
-    scope: dict[str, str] = field(default_factory=dict)  # {"model": ..., "client": ...}
+    # {"provider": ..., "model": ..., "client": ...}; every key present must match.
+    # {"provider": "p", "client": "c"} is client c's own share of provider p.
+    scope: dict[str, str] = field(default_factory=dict)
     strict: bool = True  # strict caps reserve the enforceable maximum
     version: int = 1
 
@@ -41,11 +44,22 @@ class ResourceSpec:
             raise ValueError(f"resource {self.id}: rolling window needs length")
         if self.window == "calendar" and not (self.length or self.reset_tz):
             raise ValueError(f"resource {self.id}: calendar window needs length or reset_tz")
+        unknown = sorted(set(self.scope) - set(SCOPE_KEYS))
+        if unknown:
+            # an unknown key would otherwise be ignored and the limit would apply to everything
+            raise ValueError(
+                f"resource {self.id}: unknown scope key(s) {unknown}; expected {list(SCOPE_KEYS)}"
+            )
+        for k, v in self.scope.items():
+            if not isinstance(v, str) or not v:
+                raise ValueError(f"resource {self.id}: scope {k!r} must be a non-empty string")
 
-    def applies(self, client: str, model: str | None) -> bool:
+    def applies(self, client: str, model: str | None, provider: str | None = None) -> bool:
         if "client" in self.scope and self.scope["client"] != client:
             return False
         if "model" in self.scope and self.scope["model"] != model:
+            return False
+        if "provider" in self.scope and self.scope["provider"] != provider:
             return False
         return True
 
