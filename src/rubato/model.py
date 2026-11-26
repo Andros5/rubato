@@ -92,6 +92,7 @@ class Step:
     duration_estimate: int = 1
     max_attempts: int = 1
     outcomes: tuple[Outcome, ...] = ()  # one per attempt; trace ground truth
+    provider: str | None = None  # provider whose limits apply (resources scoped by "provider")
 
     def outcome(self, attempt: int) -> tuple[Outcome, bool]:
         """Outcome of attempt ``attempt`` (1-based) and whether it came from the trace."""
@@ -209,3 +210,4 @@ class ReadyItem:
     remaining_duration: int  # estimated critical path from now, incl. this step
     model: str | None = None
     seq: int = 0  # stable tie-breaker (trace order)
+    provider: str | None = None

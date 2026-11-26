@@ -25,17 +25,17 @@ Políticas: `fifo` (orden de llegada), `radar` (prioridad y elegibilidad, refere
 
 | Método y ruta | Efecto |
 |---|---|
-| `POST /v1/jobs` | Registra `{id, class, urgent, priority, deadline?, meta?, steps:[{id, model, estimate, maximum?, depends_on?, duration_estimate?, max_attempts?}]}`. Idempotente por `Idempotency-Key` (por defecto `job:<id>`); misma clave con otro cuerpo → 409. Avisa si un tope estricto queda `orientative`. |
+| `POST /v1/jobs` | Registra `{id, class, urgent, priority, deadline?, meta?, steps:[{id, model, provider?, estimate, maximum?, depends_on?, duration_estimate?, max_attempts?}]}`. Idempotente por `Idempotency-Key` (por defecto `job:<id>`); misma clave con otro cuerpo → 409. Avisa si un tope estricto queda `orientative`. |
 | `GET /v1/jobs/{id}` | Estado del trabajo, pasos e intentos (solo los propios). |
 | `POST /v1/jobs/{id}/cancel` | Cierra pasos futuros; libera permisos no iniciados. |
-| `POST /v1/claims` | `{slots?, job?, step?, shadow?}` → `{permit:{attempt, job, step, model, admitted, start_before}}` o `{permit:null, retry_after, next_reconsider, step:{state,last_reason}}`. Con `shadow:true` devuelve la decisión que tomaría sin reservar. |
+| `POST /v1/claims` | `{slots?, job?, step?, shadow?}` → `{permit:{attempt, job, step, model, provider, admitted, start_before}}` o `{permit:null, retry_after, next_reconsider, step:{state,last_reason}}`. Con `shadow:true` devuelve la decisión que tomaría sin reservar. |
 | `POST /v1/attempts/{id}/start` | Obligatorio antes de llamar al proveedor. `409 permit_expired` si caducó. Idempotente. |
 | `POST /v1/attempts/{id}/finish` | `{status: ok|invalid|rate_limited|error, usage, receipt?, retry_after?}`. Repetir con el mismo cuerpo devuelve lo mismo; con otro, 409. |
 | `POST /v1/attempts/{id}/reconcile` | `{consumed, usage?, receipt?, evidence?}` para intentos `unknown`. |
 | `POST /v1/observations` | Modo `shadow`: `{job, step, status, usage}` reserva el uso real de una llamada ya hecha. |
 | `GET /v1/decisions?job=&limit=` | Decisiones accesibles al cliente. |
 | `GET /v1/usage` | Saldo por recurso (usado, disponible, incierto) y pasos pendientes. |
-| `PUT /v1/admin/resources` | (admin) Límites compartidos; versión en `config_versions`. |
+| `PUT /v1/admin/resources` | (admin) Límites compartidos; versión en `config_versions`. `scope` admite `provider`, `model` y `client` (combinables, p. ej. la parte de un cliente en un proveedor); otra clave → 422. |
 | `PUT /v1/admin/policy` | (admin) Política activa; por defecto `radar`. |
 | `POST /v1/admin/clients` | (admin) Alta de cliente y token. |
 | `GET /v1/admin/attempts?state=` | (admin) Intentos por estado, p. ej. `unknown`. |

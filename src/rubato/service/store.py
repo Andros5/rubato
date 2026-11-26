@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 import psycopg
 
-from ..core import Capacity, Demand, decidir
+from ..core import Capacity, Demand, decidir, need_by_resource, pause_key
 from ..model import Action, ReadyItem, Reason, find_cycle, tokens_total
 from ..policies import RadarPolicy, make_policy
 from ..resources import Entry, Ledger, ResourceSpec
@@ -105,7 +105,10 @@ def require_admin(client: dict) -> None:
 
 
 def put_resources(conn, specs: list[dict], by: str) -> list[ResourceSpec]:
-    parsed = [ResourceSpec(**{**s, "scope": s.get("scope") or {}}) for s in specs]
+    try:
+        parsed = [ResourceSpec(**{**s, "scope": s.get("scope") or {}}) for s in specs]
+    except (TypeError, ValueError) as e:
+        raise ApiError(422, "invalid", str(e)) from e
     ids = [p.id for p in parsed]
     lock(conn)
     for p in parsed:
@@ -276,6 +279,8 @@ def _validate_job(body: dict) -> None:
                 raise ApiError(422, "invalid", f"step {s['id']!r} depends on unknown step {d!r}")
         if s.get("model") is not None and not isinstance(s["model"], str):
             raise ApiError(422, "invalid", f"step {s['id']!r}: 'model' must be a string")
+        if s.get("provider") is not None and not (isinstance(s["provider"], str) and s["provider"]):
+            raise ApiError(422, "invalid", f"step {s['id']!r}: 'provider' must be a non-empty string")
         _int(s.get("duration_estimate", 1), f"step {s['id']!r}: 'duration_estimate'", 0, 86400 * 7)
         _int(s.get("max_attempts", 1), f"step {s['id']!r}: 'max_attempts'", 1, 50)
     cycle = find_cycle({s["id"]: s.get("depends_on") or [] for s in steps})
@@ -313,13 +318,18 @@ def register_job(conn, client: dict, body: dict) -> dict:
     )
     for s in steps:
         model = s.get("model")
+        provider = s.get("provider")
         if allowed and model not in allowed:
             raise ApiError(422, "invalid", f"model {model!r} is not declared for client {client['id']}")
         est = tokens_total(_amounts(s.get("estimate"), "estimate"))
         mx = _amounts(s.get("maximum"), "maximum") or None
         cap_mode = "strict"
         for spec in specs:
-            if spec.window == "concurrency" or not spec.strict or not spec.applies(client["id"], model):
+            if (
+                spec.window == "concurrency"
+                or not spec.strict
+                or not spec.applies(client["id"], model, provider)
+            ):
                 continue
             if spec.unit not in EXACT_UNITS and not (mx and spec.unit in tokens_total(mx)):
                 cap_mode = "orientative"
@@ -327,13 +337,14 @@ def register_job(conn, client: dict, body: dict) -> dict:
                     f"step {s['id']}: no enforceable maximum for {spec.unit}; {spec.id} is orientative"
                 )
         conn.execute(
-            "INSERT INTO steps (job_id, step_id, depends_on, model, estimate, maximum, cap_mode, duration_estimate, max_attempts) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "INSERT INTO steps (job_id, step_id, depends_on, model, provider, estimate, maximum, cap_mode, "
+            "duration_estimate, max_attempts) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 jid,
                 s["id"],
                 list(s.get("depends_on") or []),
                 model,
+                provider,
                 json.dumps(est),
                 json.dumps(mx) if mx else None,
                 cap_mode,
@@ -597,14 +608,26 @@ def _round(
     for jid, srows in by_job.items():
         rem: dict[str, int] = {}
         dur = 0
+        pending = []
         for s in srows:
             if s["state"] in ("waiting", "ready"):
-                for k, v in _admission(s).items():
+                amt = _admission(s)
+                for k, v in amt.items():
                     rem[k] = rem.get(k, 0) + v
                 dur += int(s["duration_estimate"])
+                pending.append((s["model"], s["provider"], amt))
         j0 = srows[0]
         if rem:
-            demand.append(Demand(jid, j0["urgent"], j0["deadline"], rem, remaining_duration=dur))
+            demand.append(
+                Demand(
+                    jid,
+                    j0["urgent"],
+                    j0["deadline"],
+                    rem,
+                    remaining_duration=dur,
+                    by_resource=need_by_resource(specs, j0["client_id"], pending),
+                )
+            )
         for s in srows:
             target = only is not None and (jid, s["step_id"]) == only
             if s["state"] != "ready" or (free.get(s["client_id"], 0) <= 0 and not target):
@@ -629,6 +652,7 @@ def _round(
                     remaining_duration=dur,
                     model=s["model"],
                     seq=int(s["seq"]),
+                    provider=s["provider"],
                 )
             )
     if not ready:
@@ -709,7 +733,7 @@ def _grant(conn, t, s, d, label, specs) -> dict:
         (aid, s["job_id"], s["step_id"], n, s["client_id"], json.dumps(admitted), t, t + GRANT_TTL),
     )
     for spec in specs:
-        if spec.applies(s["client_id"], s["model"]):
+        if spec.applies(s["client_id"], s["model"], s["provider"]):
             amount = spec.need_of(admitted)
             if amount:
                 conn.execute(
@@ -786,7 +810,7 @@ def claim(
             )
     schedule_pass(conn, t, focus=(client["id"], job, step) if job and step else None)
     a = conn.execute(
-        "SELECT a.*, s.model, s.maximum, s.estimate FROM attempts a JOIN steps s ON s.job_id=a.job_id AND s.step_id=a.step_id "
+        "SELECT a.*, s.model, s.provider, s.maximum, s.estimate FROM attempts a JOIN steps s ON s.job_id=a.job_id AND s.step_id=a.step_id "
         "WHERE a.client_id=%s AND a.state='granted' AND NOT a.delivered AND a.grant_expires_at > %s "
         "AND (%s::text IS NULL OR a.job_id=%s) AND (%s::text IS NULL OR a.step_id=%s) "
         "ORDER BY a.granted_at, a.id LIMIT 1 FOR UPDATE OF a SKIP LOCKED",
@@ -802,6 +826,7 @@ def claim(
                 "step": a["step_id"],
                 "n": a["n"],
                 "model": a["model"],
+                "provider": a["provider"],
                 "admitted": a["admitted"],
                 "maximum": a["maximum"],
                 "start_before": a["grant_expires_at"],
@@ -865,7 +890,7 @@ def observe(conn, client: dict, body: dict) -> dict:
         ),
     )
     for spec in load_resources(conn):
-        if spec.window != "concurrency" and spec.applies(client["id"], s["model"]):
+        if spec.window != "concurrency" and spec.applies(client["id"], s["model"], s["provider"]):
             amt = spec.need_of(usage)
             if amt:
                 conn.execute(
@@ -979,10 +1004,11 @@ def _after_outcome(conn, t, a, status, retry_after=None) -> None:
     else:
         if status == "rate_limited":
             until = t + int(retry_after or 1)
+            kind, value = pause_key(s["model"], s["provider"])
             conn.execute(
-                "INSERT INTO pauses (scope_kind, scope_value, until, reason) VALUES ('model', %s, %s, '429') "
+                "INSERT INTO pauses (scope_kind, scope_value, until, reason) VALUES (%s, %s, %s, '429') "
                 "ON CONFLICT (scope_kind, scope_value) DO UPDATE SET until=GREATEST(pauses.until, EXCLUDED.until)",
-                (s["model"] or "", until),
+                (kind, value, until),
             )
         if s["attempts"] >= s["max_attempts"]:
             conn.execute(

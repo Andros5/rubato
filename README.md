@@ -43,6 +43,8 @@ always possible. Rubato makes the trade-off explicit instead.
 - **Real limits.** Rolling windows, calendar windows with time zones (including 23-hour
   DST days), concurrency, totals, tokens and integer money with versioned tariffs, and
   429 pauses with `Retry-After`.
+- **Several providers.** Each step names its provider; limits can be scoped to a
+  provider, a model and a client, so each client gets its own share of each provider.
 - **Honest data.** Every trace field carries its provenance (`observed`, `derived`,
   `synthetic`, `hypothetical`), and reports never mix them.
 - **Offline optimum.** An exhaustive search and an OR-Tools CP-SAT solver compute the
@@ -202,7 +204,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.
 
 ## Roadmap
 
-- Several providers with their own limits per client.
 - Rolling-horizon planning once enough prospective days with observed arrivals exist.
 - Model selection by quality per class, which needs quality data, not only price.
 - A usability pilot with the maintainer of another AI automation.

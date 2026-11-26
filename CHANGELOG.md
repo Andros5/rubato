@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Several providers with their own limits per client. Steps take an optional `provider`
+  (trace, capture, service API, permits); resource `scope` accepts `provider` and
+  combines it with `model` and `client`, e.g. `{"provider": "a", "client": "radar"}` is
+  the radar's share of provider `a`. Simulator and service still share `core.decidir`.
+- A 429 on a step with a provider but no model pauses that provider only.
+- The urgent reserve counts known urgent demand per resource, only on the resources that
+  apply to each pending step: urgent work on one provider no longer holds capacity of
+  another. Results with a single provider are unchanged.
+- Unknown `scope` keys are rejected (they used to be ignored, so the limit applied to
+  every step); `PUT /v1/admin/resources` answers 422 instead of 500 on invalid resources.
+- Migration `0004_step_provider.sql` (`steps.provider`).
+
 ## 1.1.1 — 2026-11-24
 
 - Public repository: README with architecture, screenshots and results; CONTRIBUTING,

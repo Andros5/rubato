@@ -163,7 +163,7 @@ class ReservePolicy(_Base):
                 (spec.id, True), 0
             )
             speculative = max(0, amount - urgent_used)
-        known = sum(spec.need_of(d.remaining_need) for d in demand if d.urgent and not self._lost(now, d))
+        known = sum(d.need_on(spec) for d in demand if d.urgent and not self._lost(now, d))
         known = max(0, known - round_alloc.get((spec.id, True), 0))
         held = max(speculative, known)
         hold_end = None

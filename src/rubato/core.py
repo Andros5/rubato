@@ -33,14 +33,49 @@ class Demand:
     remaining_need: dict[str, int]
     oldest_wait_since: int | None = None
     remaining_duration: int = 0  # estimated time still needed (sequential), for deadline checks
+    # remaining need per resource id, counting each step only on the resources that apply
+    # to it (its provider, model and client). None = fall back to remaining_need on every resource.
+    by_resource: dict[str, int] | None = None
+
+    def need_on(self, spec: ResourceSpec) -> int:
+        if self.by_resource is not None:
+            return self.by_resource.get(spec.id, 0)
+        return spec.need_of(self.remaining_need)
+
+
+def need_by_resource(
+    specs: Sequence[ResourceSpec],
+    client: str,
+    steps: Sequence[tuple[str | None, str | None, dict[str, int]]],
+) -> dict[str, int]:
+    """Sum the admission amounts of ``steps`` ((model, provider, amount) each) per applicable resource."""
+    out: dict[str, int] = {}
+    for model, provider, amount in steps:
+        for spec in specs:
+            if not spec.applies(client, model, provider):
+                continue
+            if spec.window == "concurrency":
+                out[spec.id] = 1  # one slot per job, as with remaining_need
+                continue
+            n = spec.need_of(amount)
+            if n:
+                out[spec.id] = out.get(spec.id, 0) + n
+    return out
+
+
+def pause_key(model: str | None, provider: str | None) -> tuple[str, str]:
+    """Scope paused by a 429: the model when known, else the whole provider."""
+    if model or not provider:
+        return ("model", model or "")
+    return ("provider", provider)
 
 
 @dataclass
 class Capacity:
     """Snapshot of limits at ``now``: the ledger plus active pauses.
 
-    pauses maps a scope key -- ("model", name), ("client", name) or ("all", "*") --
-    to the instant the pause ends.
+    pauses maps a scope key -- ("provider", name), ("model", name), ("client", name)
+    or ("all", "*") -- to the instant the pause ends.
     """
 
     ledger: Ledger
@@ -51,11 +86,14 @@ class Capacity:
         return list(self.ledger.specs.values())
 
     def applicable(self, item: ReadyItem) -> list[ResourceSpec]:
-        return [s for s in self.specs if s.applies(item.client, item.model)]
+        return [s for s in self.specs if s.applies(item.client, item.model, item.provider)]
 
     def paused_until(self, item: ReadyItem, now: int) -> int | None:
         until = None
-        for key in (("all", "*"), ("model", item.model or ""), ("client", item.client)):
+        keys = [("all", "*"), ("model", item.model or ""), ("client", item.client)]
+        if item.provider:
+            keys.append(("provider", item.provider))
+        for key in keys:
             end = self.pauses.get(key)
             if end is not None and end > now:
                 until = end if until is None else max(until, end)

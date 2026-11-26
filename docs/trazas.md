@@ -14,6 +14,20 @@ traza produce los mismos bytes y la misma huella.
 {"type":"event","kind":"pause","t":1795690000,"until":1795690300,"scope":["model","sim-flash"]}
 ```
 
+## Varios proveedores
+
+Un paso puede llevar `"provider":"a"` y un recurso puede acotarse por proveedor y
+cliente (claves de `scope`: `provider`, `model`, `client`; cualquier otra es un error):
+
+```json
+{"type":"resource","id":"a-rpd","unit":"requests","capacity":500,"window":"calendar","reset_tz":"Europe/Zurich","scope":{"provider":"a"}}
+{"type":"resource","id":"a-rpd-radar","unit":"requests","capacity":200,"window":"calendar","reset_tz":"Europe/Zurich","scope":{"provider":"a","client":"radar"}}
+{"type":"event","kind":"pause","t":1795690000,"until":1795690300,"scope":["provider","a"]}
+{"type":"event","kind":"consume","t":1795690100,"client":"otra-app","provider":"a","usage":{"requests":3}}
+```
+
+Ver D10 en [decisiones](decisiones.md).
+
 ## Unidades e IDs
 
 - Tiempo: entero; `time_unit` = `s` (segundos Unix UTC) o `turn` (casos de juguete).

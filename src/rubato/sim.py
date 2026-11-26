@@ -20,7 +20,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from .core import Capacity, Demand, decidir
+from .core import Capacity, Demand, decidir, need_by_resource, pause_key
 from .model import Action, Decision, Job, Outcome, ReadyItem, Reason, Status, find_cycle, tokens_total
 from .resources import Ledger, ResourceSpec
 
@@ -33,10 +33,12 @@ class ExternalEvent:
     kind: str  # cancel | client_down | client_up | pause | consume
     job_id: str | None = None
     client: str | None = None
-    scope: tuple[str, str] | None = None  # for pause: ("model", m) | ("all","*") | ("client", c)
+    # for pause: ("provider", p) | ("model", m) | ("client", c) | ("all", "*")
+    scope: tuple[str, str] | None = None
     until: int | None = None
     usage: dict[str, int] | None = None  # for consume: usage by applications outside Rubato
     model: str | None = None
+    provider: str | None = None
 
 
 @dataclass
@@ -256,7 +258,7 @@ class Simulator:
                     else:
                         if out.status == Status.RATE_LIMITED:
                             until = t + (out.retry_after or 1)
-                            key = ("model", step.model or "")
+                            key = pause_key(step.model, step.provider)
                             cap.pauses[key] = max(cap.pauses.get(key, 0), until)
                             push(until, PAUSE_END, key)
                         if st.attempts >= step.max_attempts:
@@ -324,7 +326,9 @@ class Simulator:
                         # usage by applications Rubato does not schedule (shared quota)
                         aid = f"external:{t}:{counter}"
                         for spec in self.resources:
-                            if spec.window != "concurrency" and spec.applies(ev.client or "", ev.model):
+                            if spec.window != "concurrency" and spec.applies(
+                                ev.client or "", ev.model, ev.provider
+                            ):
                                 amt = int(tokens_total(ev.usage).get(spec.unit, 0))
                                 if amt:
                                     ledger.book(spec.id, t, amt, aid, False, ev.client or "external")
@@ -343,9 +347,20 @@ class Simulator:
                         for s in job.steps
                         if state[(jid, s.id)].status == "ready"
                     ]
+                    pending = [
+                        (s.model, s.provider, self._admission(s))
+                        for s in job.steps
+                        if state[(jid, s.id)].status in ("waiting", "ready")
+                    ]
                     demand.append(
                         Demand(
-                            jid, job.urgent, job.deadline, rem_need, min(waits) if waits else None, rem_dur
+                            jid,
+                            job.urgent,
+                            job.deadline,
+                            rem_need,
+                            min(waits) if waits else None,
+                            rem_dur,
+                            need_by_resource(self.resources, job.client, pending),
                         )
                     )
                 for s in job.steps:
@@ -387,6 +402,7 @@ class Simulator:
                             remaining_duration=rem_dur,
                             model=s.model,
                             seq=self.seq[jid],
+                            provider=s.provider,
                         )
                     )
             max_queue = max(max_queue, len(ready))
@@ -408,7 +424,9 @@ class Simulator:
                     out, from_trace = step.outcome(st.attempts)
                     aid = f"{job.id}/{step.id}/{st.attempts}"
                     admitted = self._admission(step)
-                    for spec in [r for r in self.resources if r.applies(job.client, step.model)]:
+                    for spec in [
+                        r for r in self.resources if r.applies(job.client, step.model, step.provider)
+                    ]:
                         ledger.book(spec.id, t, spec.need_of(admitted), aid, job.urgent, job.client)
                     rec = AttemptRecord(
                         aid,

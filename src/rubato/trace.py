@@ -107,6 +107,13 @@ def _resource(d: dict, line: int) -> ResourceSpec:
         raise _err(line, where, str(e)) from e
 
 
+def _opt_str(d: dict, key: str, line: int, where: str) -> str | None:
+    v = d.get(key)
+    if v is not None and (not isinstance(v, str) or not v):
+        raise _err(line, where, f"field {key!r} must be a non-empty string")
+    return v
+
+
 def _step(d: dict, line: int, jwhere: str) -> Step:
     if not isinstance(d, dict):
         raise _err(line, jwhere, "each step must be an object")
@@ -136,6 +143,7 @@ def _step(d: dict, line: int, jwhere: str) -> Step:
         duration_estimate=d.get("duration_estimate", 1),
         max_attempts=d.get("max_attempts", max(1, len(outcomes))),
         outcomes=tuple(outcomes),
+        provider=_opt_str(d, "provider", line, where),
     )
 
 
@@ -189,6 +197,7 @@ def _event(d: dict, line: int) -> ExternalEvent:
         until=d.get("until"),
         usage=d.get("usage"),
         model=d.get("model"),
+        provider=d.get("provider"),
     )
 
 
@@ -266,6 +275,8 @@ def step_to_dict(s: Step) -> dict:
         d["depends_on"] = list(s.depends_on)
     if s.model is not None:
         d["model"] = s.model
+    if s.provider is not None:
+        d["provider"] = s.provider
     if s.maximum:
         d["maximum"] = dict(s.maximum)
     d["duration_estimate"] = s.duration_estimate
@@ -305,6 +316,7 @@ def event_to_dict(e: ExternalEvent) -> dict:
         ("until", e.until),
         ("usage", e.usage),
         ("model", e.model),
+        ("provider", e.provider),
     ):
         if v is not None:
             d[k] = v
