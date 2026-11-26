@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- CI: new `postgres` job brings up the Compose stack and runs the 23 service and
+  migration tests that the matrix skips. Checked against fastapi 0.165, psycopg 3.3.9,
+  psycopg-pool 3.3.3, ortools 9.15 and pytest 9.2; the lower bounds stay as they are.
 - Several providers with their own limits per client. Steps take an optional `provider`
   (trace, capture, service API, permits); resource `scope` accepts `provider` and
   combines it with `model` and `client`, e.g. `{"provider": "a", "client": "radar"}` is
