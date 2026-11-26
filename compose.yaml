@@ -1,4 +1,7 @@
-# Local environment: API + planner + PostgreSQL + simulated provider. No real keys.
+# Local environment with API, planner, PostgreSQL and a simulated provider.
+# Start an isolated demo on localhost.
+# docker compose --env-file config/demo-compose.example.vars -p rubato-demo --profile ha build api
+# docker compose --env-file config/demo-compose.example.vars -p rubato-demo --profile ha up -d --wait
 name: rubato
 # Sized for a PC that runs this stack all day (docs/operacion.md, "Recursos").
 x-logging: &logging  # rotated, compressed logs: the default json-file driver grows without bound
@@ -33,7 +36,7 @@ services:
     logging: *logging
     environment:
       POSTGRES_USER: rubato
-      POSTGRES_PASSWORD: rubato-local-only
+      POSTGRES_PASSWORD: ${RUBATO_DB_PASSWORD:-rubato-local-only}
       POSTGRES_DB: rubato
     ports: ["127.0.0.1:${RUBATO_DB_PORT:-55432}:5432"]
     volumes: [dbdata:/var/lib/postgresql/data]
@@ -49,7 +52,8 @@ services:
     build: .
     image: rubato:${RUBATO_VERSION:-1.1.1}
     environment: &env
-      RUBATO_DSN: postgresql://rubato:rubato-local-only@db:5432/rubato
+      RUBATO_DSN: postgresql://rubato:${RUBATO_DB_PASSWORD:-rubato-local-only}@db:5432/rubato
+      RUBATO_ENVIRONMENT: ${RUBATO_ENVIRONMENT:-habitual}
       RUBATO_CLIENTS: ${RUBATO_CLIENTS:-admin:admin-local-token:admin:0,radar:radar-local-token:client:1,citalab:citalab-local-token:client:1}
       RUBATO_TEST_CLOCK: ${RUBATO_TEST_CLOCK:-0}  # 1 only for tests and demos: enables reset and clock endpoints
       RUBATO_GRANT_TTL: ${RUBATO_GRANT_TTL:-60}
@@ -80,6 +84,11 @@ services:
     logging: *logging
     depends_on:
       api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/readyz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
   scheduler:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     image: rubato:${RUBATO_VERSION:-1.1.1}
@@ -103,6 +112,11 @@ services:
     user: "0"
     depends_on:
       api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8100/healthz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 volumes:
   dbdata:
   providerdata:
