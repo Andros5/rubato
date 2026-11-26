@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- CI: new `postgres` job brings up the Compose stack and runs the 23 service and
+  migration tests that the matrix skips. Checked against fastapi 0.165, psycopg 3.3.9,
+  psycopg-pool 3.3.3, ortools 9.15 and pytest 9.2; the lower bounds stay as they are.
+
 ## 1.1.1 — 2026-11-24
 
 - Public repository: README with architecture, screenshots and results; CONTRIBUTING,
