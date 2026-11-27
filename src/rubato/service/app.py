@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from . import db, store
+from . import db, scheduler, store
 from .panel import PANEL_HTML
 from .store import ApiError
 
@@ -25,6 +26,17 @@ POOL: ConnectionPool | None = None
 
 def _json_log(level: int, msg: str, **fields) -> None:
     log.log(level, json.dumps({"msg": msg, **fields}, default=str))
+
+
+def _embedded_planner(stop: threading.Event) -> None:
+    """The planner thread must outlive unexpected errors: as a separate process, the
+    container would restart it; inside the API nobody would."""
+    while not stop.is_set():
+        try:
+            scheduler.run(stop)
+        except Exception as e:
+            _json_log(logging.ERROR, "embedded scheduler failed, restarting", error=repr(e)[:200])
+            stop.wait(5)
 
 
 @asynccontextmanager
@@ -53,7 +65,17 @@ async def lifespan(app: FastAPI):
                     "example tokens in use; set RUBATO_CLIENTS before exposing the service",
                     clients=weak,
                 )
+    planner = None
+    if os.environ.get("RUBATO_EMBEDDED_SCHEDULER") == "1":  # one process instead of api + scheduler
+        stop = threading.Event()
+        planner = threading.Thread(
+            target=_embedded_planner, args=(stop,), name="rubato-scheduler", daemon=True
+        )
+        planner.start()
     yield
+    if planner:
+        stop.set()
+        planner.join(timeout=10)
     POOL.close()
 
 
