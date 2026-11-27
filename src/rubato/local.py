@@ -193,6 +193,10 @@ class LocalStack:
             with socket.socket() as check:
                 if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
                     check.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                else:
+                    # A stack stopped a moment ago leaves TIME_WAIT sockets on its ports;
+                    # SO_REUSEADDR ignores those but still fails while anything listens.
+                    check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
                     check.bind(("127.0.0.1", port))
                 except OSError as exc:
