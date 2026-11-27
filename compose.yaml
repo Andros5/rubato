@@ -1,9 +1,36 @@
 # Local environment: API + planner + PostgreSQL + simulated provider. No real keys.
 name: rubato
+# Sized for a PC that runs this stack all day (docs/operacion.md, "Recursos").
+x-logging: &logging  # rotated, compressed logs: the default json-file driver grows without bound
+  driver: local
+  options: {max-size: 5m, max-file: "3"}
 services:
   db:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     image: postgres:17-alpine
+    # Small-footprint settings: the database is a few MB and sees a handful of connections.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - max_connections=50
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - autovacuum_max_workers=1
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - jit=off
+      - -c
+      - min_wal_size=32MB
+      - -c
+      - max_wal_size=256MB
+    mem_limit: 256m
+    logging: *logging
     environment:
       POSTGRES_USER: rubato
       POSTGRES_PASSWORD: rubato-local-only
@@ -12,9 +39,11 @@ services:
     volumes: [dbdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rubato -d rubato"]
-      interval: 2s
+      start_period: 60s
+      start_interval: 1s  # probe every second while starting, then every 30 s
+      interval: 30s
       timeout: 3s
-      retries: 30
+      retries: 3
   api:
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     build: .
@@ -25,22 +54,30 @@ services:
       RUBATO_TEST_CLOCK: ${RUBATO_TEST_CLOCK:-0}  # 1 only for tests and demos: enables reset and clock endpoints
       RUBATO_GRANT_TTL: ${RUBATO_GRANT_TTL:-60}
       RUBATO_ATTEMPT_TIMEOUT: ${RUBATO_ATTEMPT_TIMEOUT:-600}
-    command: ["uvicorn", "rubato.service.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    # One worker is enough for a few clients (sync endpoints already run on a thread pool)
+    # and each extra one costs ~60 MB. RUBATO_API_WORKERS=2 for more throughput.
+    command: ["sh", "-c", "exec uvicorn rubato.service.app:app --host 0.0.0.0 --port 8000 --no-access-log --workers $${RUBATO_API_WORKERS:-1}"]
     ports: ["127.0.0.1:${RUBATO_API_PORT:-8000}:8000"]
     depends_on:
       db: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/readyz')"]
-      interval: 3s
+      start_period: 60s
+      start_interval: 1s
+      interval: 30s
       timeout: 3s
-      retries: 20
+      retries: 3
+    mem_limit: 256m
+    logging: *logging
   api2:  # second replica for the failover drill: docker compose --profile ha up -d
     restart: unless-stopped  # come back by itself when Docker Desktop starts
     profiles: ["ha"]
     image: rubato:${RUBATO_VERSION:-1.1.1}
     environment: *env
-    command: ["uvicorn", "rubato.service.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "rubato.service.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     ports: ["127.0.0.1:${RUBATO_API2_PORT:-8001}:8000"]
+    mem_limit: 256m
+    logging: *logging
     depends_on:
       api: {condition: service_healthy}
   scheduler:
@@ -48,14 +85,19 @@ services:
     image: rubato:${RUBATO_VERSION:-1.1.1}
     environment: *env
     command: ["python", "-m", "rubato.service.scheduler"]
+    mem_limit: 128m
+    logging: *logging
     depends_on:
       api: {condition: service_healthy}
-  provider:
+  provider:  # simulated provider, only for tests and demos: docker compose --profile demo up -d
     restart: unless-stopped  # come back by itself when Docker Desktop starts
+    profiles: ["demo"]
     image: rubato:${RUBATO_VERSION:-1.1.1}
     environment:
       RUBATO_PROVIDER_DB: /data/receipts.sqlite
-    command: ["uvicorn", "rubato.service.provider_sim:app", "--host", "0.0.0.0", "--port", "8100"]
+    command: ["uvicorn", "rubato.service.provider_sim:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log"]
+    mem_limit: 128m
+    logging: *logging
     ports: ["127.0.0.1:${RUBATO_PROVIDER_PORT:-8100}:8100"]
     volumes: [providerdata:/data]
     user: "0"

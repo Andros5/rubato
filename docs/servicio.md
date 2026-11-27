@@ -1,8 +1,8 @@
 # Servicio de admisión (F5)
 
-`docker compose up --build` levanta PostgreSQL 17, la API (FastAPI, 2 workers), el
-planificador en segundo plano y un proveedor simulado con recibos. Todo local, sin
-claves reales. Tokens de ejemplo en `compose.yaml` (`radar-local-token`,
+`docker compose up --build` levanta PostgreSQL 17, la API (FastAPI, 1 worker) y el
+planificador en segundo plano; `--profile demo` añade un proveedor simulado con recibos.
+Todo local, sin claves reales. Tokens de ejemplo en `compose.yaml` (`radar-local-token`,
 `citalab-local-token`, `admin-local-token`): son solo para el entorno local.
 
 ## Flujo

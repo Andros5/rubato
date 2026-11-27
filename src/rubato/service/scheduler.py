@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import signal
+import threading
 import time
 
 import psycopg
@@ -19,17 +20,17 @@ from . import db, store
 log = logging.getLogger("rubato.scheduler")
 
 
-def main() -> None:
-    logging.basicConfig(level=os.environ.get("RUBATO_LOG_LEVEL", "INFO"), format="%(message)s", force=True)
-    interval = float(os.environ.get("RUBATO_SCHEDULER_INTERVAL", "2"))
-    stop = {"flag": False}
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
-    while not stop["flag"]:
+def run(stop: threading.Event, interval: float | None = None) -> None:
+    """Plan until ``stop`` is set. Runs in its own process (``main``) or, with
+    ``RUBATO_EMBEDDED_SCHEDULER=1``, as a thread inside the API (one process less)."""
+    if interval is None:
+        interval = float(os.environ.get("RUBATO_SCHEDULER_INTERVAL", "2"))
+    while not stop.is_set():
         try:
             with db.connect() as conn:
                 db.migrate(conn)
                 last_maintenance = float("-inf")  # run once at start, then hourly
-                while not stop["flag"]:
+                while not stop.is_set():
                     if time.monotonic() - last_maintenance > 3600:
                         with conn.transaction():
                             log.info(json.dumps({"msg": "maintenance", **store.maintenance(conn)}))
@@ -47,10 +48,17 @@ def main() -> None:
                                 }
                             )
                         )
-                    time.sleep(interval)
+                    stop.wait(interval)
         except psycopg.OperationalError as e:
             log.warning(json.dumps({"msg": "db unavailable, retrying", "error": str(e)[:200]}))
-            time.sleep(min(10, interval * 2))
+            stop.wait(min(10, interval * 2))
+
+
+def main() -> None:
+    logging.basicConfig(level=os.environ.get("RUBATO_LOG_LEVEL", "INFO"), format="%(message)s", force=True)
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    run(stop)
 
 
 if __name__ == "__main__":

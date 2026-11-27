@@ -113,7 +113,8 @@ analyses pay for it, and the report shows that cost rather than hiding it:
 ### Service
 
 ```bash
-docker compose up --build -d                 # PostgreSQL, API, planner, simulated provider
+docker compose up --build -d                 # PostgreSQL, API and planner (~120 MB of RAM)
+docker compose --profile demo up -d          # adds the simulated provider for demos and tests
 # open http://127.0.0.1:8000/panel          (admin token from RUBATO_CLIENTS)
 rubato status --token <admin-token>          # the same view in the terminal
 rubato why radar:<job-id> --token <admin-token>   # every decision about a live job
@@ -195,7 +196,7 @@ tests/           behaviour tests (simulator, service on real PostgreSQL, adapter
 ```bash
 pip install -e ".[dev]"
 pytest -q                                                      # no network, no keys
-RUBATO_TEST_CLOCK=1 docker compose up -d --build
+RUBATO_TEST_CLOCK=1 docker compose --profile demo up -d --build
 RUBATO_TEST_API=http://127.0.0.1:8000 pytest -q -m postgres   # service on real PostgreSQL
 ruff check src tests scripts && ruff format --check src tests scripts
 ```

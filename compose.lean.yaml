@@ -1,0 +1,11 @@
+# Leaner local stack: the planner runs as a thread inside the API (one container and
+# ~25 MB less). Same behaviour; the planner just shares the API's process.
+#   docker compose -f compose.yaml -f compose.lean.yaml up -d
+# or, so that a plain `docker compose up -d` (and the Windows autostart) uses it, add to .env:
+#   COMPOSE_FILE=compose.yaml;compose.lean.yaml        (Windows; use ':' on Linux/macOS)
+services:
+  api:
+    environment:
+      RUBATO_EMBEDDED_SCHEDULER: "1"
+  scheduler:
+    profiles: ["external-scheduler"]  # not started unless asked for

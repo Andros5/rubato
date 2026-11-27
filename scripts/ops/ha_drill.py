@@ -1,7 +1,7 @@
 """Failover drill: two API replicas, two consumers, one replica killed during a reservation
 and the other during a simulated provider call.
 
-Compose:   docker compose --profile ha up -d   (RUBATO_GRANT_TTL=5 recommended)
+Compose:   docker compose --profile ha --profile demo up -d   (RUBATO_GRANT_TTL=5 recommended)
            python scripts/ops/ha_drill.py --kill docker:rubato-api2-1,docker:rubato-api-1
 Kubernetes: python scripts/ops/ha_drill.py --a http://127.0.0.1:18000 --b http://127.0.0.1:18001 \
            --kill kubectl:rubato/api-0,kubectl:rubato/api-1 --provider http://127.0.0.1:18100

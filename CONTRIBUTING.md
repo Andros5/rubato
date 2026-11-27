@@ -16,7 +16,7 @@ pytest -q                       # simulator, CLI, report, SDK: no network, no ke
 Service tests need a running stack in test mode:
 
 ```bash
-RUBATO_TEST_CLOCK=1 docker compose up -d --build
+RUBATO_TEST_CLOCK=1 docker compose --profile demo up -d --build
 RUBATO_TEST_API=http://127.0.0.1:8000 \
 RUBATO_TEST_DSN=postgresql://rubato:rubato-local-only@127.0.0.1:55432/rubato \
 pytest -q -m postgres

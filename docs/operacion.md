@@ -42,8 +42,52 @@ se aplican al arrancar con un candado consultivo (varias réplicas a la vez son 
 
 ## Réplicas
 
-`docker compose --profile ha up -d` añade una segunda réplica de la API (`:8001`).
+`docker compose --profile ha --profile demo up -d` añade una segunda réplica de la API (`:8001`)
+y el proveedor simulado que usa el simulacro.
 `python scripts/ops/ha_drill.py` ejecuta dos consumidores, mata una réplica durante una
 reserva y la otra durante una llamada simulada, y mide reatención, permisos duplicados,
 descuadre de saldo y latencia. En Kubernetes: `scripts/ops/k8s_up.ps1` y el mismo
 script con `--kill "kubectl:rubato/app=api#0,…"` (ver `deploy/`).
+
+## Recursos
+
+El stack está pensado para quedarse encendido en un PC con poca memoria. Medido con
+`docker stats` tras la batería `pytest -m postgres` (Linux, 4 CPU):
+
+| | antes (1.1.1) | `compose.yaml` | con `compose.lean.yaml` |
+|---|---|---|---|
+| RAM de los contenedores | ~250 MiB | ~120 MiB | ~92 MiB |
+| CPU en reposo (s de CPU por minuto) | 5,3 | 0,5 | 0,5 |
+| Imagen `rubato` | 227 MB | 132 MB | 132 MB |
+| Arranque hasta `healthy` | 7,7 s | 4,2 s | 4,2 s |
+| Peticiones/s con 10 clientes (`/v1/claims` + `/v1/usage`) | 203 | 304 | |
+
+Qué lo consigue y cómo deshacerlo si hace falta:
+
+- **Un worker de uvicorn** (`RUBATO_API_WORKERS`, por defecto 1). Los endpoints son
+  síncronos y ya se sirven desde un pool de hilos; cada worker extra cuesta ~60 MB.
+- **Healthchecks cada 30 s** con `start_interval: 1s` durante el arranque (antes cada
+  2-3 s, y cada sonda arrancaba un intérprete de Python: ~90 % de la CPU en reposo).
+- **Bytecode precompilado** en la imagen: la imagen oficial trae la biblioteca estándar
+  sin `.pyc` y el usuario sin privilegios no puede escribirlos, así que cada proceso la
+  recompilaba al arrancar.
+- **Imagen Alpine multi-etapa** sin pip ni caché de compilación.
+- **PostgreSQL pequeño**: `shared_buffers=32MB`, `max_connections=50`, un solo
+  autovacuum, sin JIT ni consultas paralelas (la base ocupa unos MB).
+- **Proveedor simulado en el perfil `demo`**: solo lo usan las pruebas y las demos.
+- **Registros rotados** (`local`, 3 × 5 MB por servicio) y sin el registro de acceso
+  duplicado de uvicorn: la API ya registra cada petición en JSON.
+- **Límites de memoria** (`mem_limit`) como red de seguridad, con margen sobre el pico
+  medido; si un contenedor los supera, Docker lo reinicia.
+
+`compose.lean.yaml` ejecuta además el planificador como un hilo dentro de la API
+(`RUBATO_EMBEDDED_SCHEDULER=1`): un contenedor menos y unos 25 MB menos. Para que
+`docker compose up -d` (y el arranque automático de Windows) lo use, añade a `.env`:
+
+```text
+COMPOSE_FILE=compose.yaml;compose.lean.yaml
+```
+
+Al cambiar de configuración, `docker compose up -d --remove-orphans` no borra los
+contenedores de servicios que quedan fuera de los perfiles activos; elimínalos con
+`docker compose rm -sf provider scheduler`.
